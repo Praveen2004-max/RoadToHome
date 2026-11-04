@@ -1,15 +1,16 @@
+
 {
   "name": "roadtohome",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "commonjs",
   "scripts": {
-  "dev": "vite",
-  "backend": "nodemon Backend/server.js",
-  "start": "node Backend/server.js",
-  "build": "vite build",
-  "lint": "eslint .",
-  "preview": "vite preview"
+    "dev": "vite",
+    "backend": "nodemon backend/server.js",
+    "start": "node backend/server.js",
+    "build": "vite build",
+    "lint": "eslint .",
+    "preview": "vite preview"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
@@ -45,8 +46,6 @@
     "tailwindcss": "^4.3.3",
     "vite": "^8.3.4"
   },
-  "description": "This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.",
-  "main": "eslint.config.js",
-  "author": "",
+  "main": "backend/server.js",
   "license": "ISC"
 }
