@@ -3,7 +3,7 @@ const express = require("express");
 const router = express.Router();
 
 // Upload Middleware
-const upload = require("../Middleware/uploads");
+const upload = require("../middleware/uploads");
 
 // Controllers
 const {
@@ -18,7 +18,7 @@ const {
 const {
   protect,
   adminOnly,
-} = require("../Middleware/authMiddleware");
+} = require("../middleware/authMiddleware");
 
 // ========================================
 // AUTHENTICATION ROUTES

@@ -26,9 +26,9 @@ const {
 const {
   protect,
   adminOnly,
-} = require("../Middleware/authMiddleware");
+} = require("../middleware/authMiddleware");
 
-const upload = require("../Middleware/uploads");
+const upload = require("../middleware/uploads");
 
 // ========================================
 // PUBLIC HOME PAGE ROUTES
