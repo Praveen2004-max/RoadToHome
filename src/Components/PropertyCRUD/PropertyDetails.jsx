@@ -1,5 +1,5 @@
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 
 import {
@@ -24,37 +24,51 @@ import {
 import { getSingleProperty } from "../../services/propertyService";
 import WriteReview from "../WriteReview";
 
+// Render backend URL
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL ||
+  "https://roadtohome-api.onrender.com/api";
 
-const API_URL = "http://localhost:5000";
+const IMAGE_BASE_URL = API_BASE_URL.replace(/\/api\/?$/, "");
 
+// Convert image path into a complete URL
 function getImageUrl(image) {
-  if (!image || typeof image !== "string") return "";
+  if (!image) return "";
 
-  if (image.startsWith("http")) return image;
-
-  if (image.startsWith("/")) {
-    return `${API_URL}${image}`;
+  // Support image object: { url } or { path }
+  if (typeof image === "object") {
+    image = image.url || image.path || "";
   }
 
-  if (image.startsWith("uploads/")) {
-    return `${API_URL}/${image}`;
+  if (typeof image !== "string" || !image.trim()) {
+    return "";
   }
 
-  return `${API_URL}/uploads/${image}`;
+  image = image.trim();
+
+  // Already an absolute URL
+  if (/^https?:\/\//i.test(image)) {
+    // Replace old localhost URL with deployed backend
+    return image.replace(
+      /^https?:\/\/(localhost|127\.0\.0\.1):5000/i,
+      IMAGE_BASE_URL
+    );
+  }
+
+  // Relative image path
+  return `${IMAGE_BASE_URL}/${image.replace(/^\/+/, "")}`;
 }
 
 export default function PropertyDetails() {
   const { id } = useParams();
-
   const navigate = useNavigate();
+
   const [property, setProperty] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const [activeImage, setActiveImage] = useState(0);
   const [isImageOpen, setIsImageOpen] = useState(false);
-
-  
 
   // Fetch Property
   useEffect(() => {
@@ -89,8 +103,8 @@ export default function PropertyDetails() {
         if (isMounted) {
           setError(
             err.response?.data?.message ||
-            err.message ||
-            "Unable to load property"
+              err.message ||
+              "Unable to load property"
           );
         }
       } finally {
@@ -107,11 +121,9 @@ export default function PropertyDetails() {
     };
   }, [id]);
 
-  // Get Images
+  // Get Property Images
   const images = Array.isArray(property?.images)
-    ? property.images.filter(
-        (image) => typeof image === "string" && image.trim()
-      )
+    ? property.images.filter(Boolean)
     : property?.image
       ? [property.image]
       : [];
@@ -119,22 +131,20 @@ export default function PropertyDetails() {
   const totalImages = images.length;
 
   // Next Image
-  const nextImage = () => {
+  const nextImage = useCallback(() => {
     if (!totalImages) return;
 
     setActiveImage((prev) => (prev + 1) % totalImages);
-  };
+  }, [totalImages]);
 
   // Previous Image
-  const previousImage = () => {
+  const previousImage = useCallback(() => {
     if (!totalImages) return;
 
-    setActiveImage(
-      (prev) => (prev - 1 + totalImages) % totalImages
-    );
-  };
+    setActiveImage((prev) => (prev - 1 + totalImages) % totalImages);
+  }, [totalImages]);
 
-  // Keyboard Controls for Fullscreen
+  // Fullscreen Keyboard Controls
   useEffect(() => {
     if (!isImageOpen) return;
 
@@ -153,15 +163,15 @@ export default function PropertyDetails() {
     };
 
     document.addEventListener("keydown", handleKeyDown);
-
     document.body.style.overflow = "hidden";
 
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
       document.body.style.overflow = "";
     };
-  }, [isImageOpen, totalImages]);
+  }, [isImageOpen, nextImage, previousImage]);
 
+  // Loading
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -173,10 +183,10 @@ export default function PropertyDetails() {
     );
   }
 
+  // Error
   if (error || !property) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center px-4">
-
         <h2 className="text-2xl font-bold text-red-600">
           {error || "Property not found"}
         </h2>
@@ -187,77 +197,52 @@ export default function PropertyDetails() {
         >
           Back to My Properties
         </Link>
-
       </div>
     );
   }
 
-
+  // Owner Details
   const owner =
     property.owner && typeof property.owner === "object"
       ? property.owner
       : {};
 
-    const loggedInUser = JSON.parse(
-      localStorage.getItem("user") || "null"
-    );
-
-    const loggedInUserId =
-      loggedInUser?._id || loggedInUser?.id || loggedInUser?.user?._id;
-
-    const propertyOwnerId =
-      typeof property.owner === "object"
-        ? property.owner?._id
-        : property.owner;
-
-    console.log("Logged In User ID:", loggedInUserId);
-    console.log("Property Owner ID:", propertyOwnerId);
-    console.log(  
-      "Is Own Property:",
-      String(loggedInUserId) === String(propertyOwnerId)
-    );
-
-  const location =
-    typeof property.location === "object"
-      ? [
-          property.location?.address,
-          property.location?.city,
-          property.location?.state,
-        ]
-          .filter(Boolean)
-          .join(", ")
-      : property.location || "Location unavailable";
-
-  const phone = (owner.phone || "").replace(/\D/g, "");
+  const phone = String(owner.phone || "").replace(/\D/g, "");
 
   const whatsappNumber =
     phone.length === 10 ? `91${phone}` : phone;
 
-
-  
-
-
+  // Property Location
+  const location =
+    typeof property.location === "object" && property.location
+      ? [
+          property.location.address,
+          property.location.city,
+          property.location.state,
+        ]
+            .filter(Boolean)
+            .join(", ") || "Location unavailable"
+      : property.location || "Location unavailable";
 
   return (
     <div className="min-h-screen bg-gray-50 px-4 py-8 sm:px-8">
-
       <div className="mx-auto max-w-6xl">
 
         {/* Back Button */}
-        <p
-          onClick={()=>navigate(-1)}
-          className="mb-6 inline-flex items-center gap-2 font-semibold text-gray-600 hover:text-emerald-600 cursor-pointer"
+        <button
+          type="button"
+          onClick={() => navigate(-1)}
+          className="mb-6 inline-flex cursor-pointer items-center gap-2 font-semibold text-gray-600 hover:text-emerald-600"
         >
           <ArrowLeft size={18} />
           Back to Properties
-        </p>
+        </button>
 
         {/* IMAGE GALLERY */}
         <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
 
           {/* Main Image */}
           <div className="group relative h-[280px] bg-gray-100 sm:h-[480px]">
-
             {totalImages > 0 ? (
               <>
                 <button
@@ -268,7 +253,11 @@ export default function PropertyDetails() {
                 >
                   <img
                     src={getImageUrl(images[activeImage])}
-                    alt={property.name}
+                    alt={property.name || "Property"}
+                    onError={(e) => {
+                      e.currentTarget.onerror = null;
+                      e.currentTarget.style.display = "none";
+                    }}
                     className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.02]"
                   />
                 </button>
@@ -288,7 +277,7 @@ export default function PropertyDetails() {
                   {activeImage + 1} / {totalImages}
                 </span>
 
-                {/* Previous */}
+                {/* Previous and Next */}
                 {totalImages > 1 && (
                   <>
                     <button
@@ -300,7 +289,6 @@ export default function PropertyDetails() {
                       <ChevronLeft size={24} />
                     </button>
 
-                    {/* Next */}
                     <button
                       type="button"
                       onClick={nextImage}
@@ -315,19 +303,20 @@ export default function PropertyDetails() {
             ) : (
               <div className="flex h-full items-center justify-center">
                 <Home size={60} className="text-gray-400" />
+                <span className="ml-3 text-gray-500">
+                  No property images available
+                </span>
               </div>
             )}
-
           </div>
 
           {/* ALL IMAGE THUMBNAILS */}
-          {totalImages > 0 && (
+          {totalImages > 1 && (
             <div className="flex gap-3 overflow-x-auto p-4">
-
               {images.map((image, index) => (
                 <button
                   type="button"
-                  key={`${image}-${index}`}
+                  key={`${index}`}
                   onClick={() => setActiveImage(index)}
                   aria-label={`Show image ${index + 1}`}
                   className={`relative h-20 w-28 shrink-0 overflow-hidden rounded-xl border-2 transition sm:h-24 sm:w-36 ${
@@ -339,27 +328,27 @@ export default function PropertyDetails() {
                   <img
                     src={getImageUrl(image)}
                     alt={`Property ${index + 1}`}
+                    onError={(e) => {
+                      e.currentTarget.onerror = null;
+                      e.currentTarget.style.display = "none";
+                    }}
                     className="h-full w-full object-cover"
                   />
                 </button>
               ))}
-
             </div>
           )}
 
           {/* PROPERTY INFORMATION */}
           <div className="p-5 sm:p-8">
-
             <div className="flex flex-wrap items-center justify-between gap-3">
-
               <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl">
-                {property.name}
+                {property.name || "Property Details"}
               </h1>
 
               <span className="rounded-full bg-emerald-100 px-4 py-2 text-sm font-semibold text-emerald-700">
                 {property.approvalStatus || "Pending"}
               </span>
-
             </div>
 
             <p className="mt-3 flex items-center gap-2 text-gray-500">
@@ -374,7 +363,6 @@ export default function PropertyDetails() {
 
             {/* Property Stats */}
             <div className="my-7 grid grid-cols-2 gap-5 border-y border-gray-100 py-6 sm:grid-cols-4">
-
               <Info
                 icon={<Home size={21} />}
                 label="Property Type"
@@ -398,11 +386,14 @@ export default function PropertyDetails() {
                 label="Area"
                 value={
                   property.area?.value
-                    ? `${property.area.value} ${property.area.unit || "Sq.ft."}`
-                    : "N/A"
+                    ? `${property.area.value} ${
+                        property.area.unit || "Sq.ft."
+                      }`
+                    : typeof property.area === "number"
+                      ? `${property.area} Sq.ft.`
+                      : "N/A"
                 }
               />
-
             </div>
 
             {/* Description */}
@@ -415,59 +406,55 @@ export default function PropertyDetails() {
             </p>
 
             {/* Amenities */}
-            {property.amenities?.length > 0 && (
-              <div className="mt-8">
+            {Array.isArray(property.amenities) &&
+              property.amenities.length > 0 && (
+                <div className="mt-8">
+                  <h2 className="text-xl font-bold">
+                    Amenities
+                  </h2>
 
-                <h2 className="text-xl font-bold">
-                  Amenities
-                </h2>
-
-                <div className="mt-4 flex flex-wrap gap-3">
-
-                  {property.amenities.map((item, index) => (
-                    <span
-                      key={index}
-                      className="flex items-center gap-2 rounded-xl bg-emerald-50 px-4 py-2 text-sm text-emerald-700"
-                    >
-                      <CheckCircle size={16} />
-                      {item}
-                    </span>
-                  ))}
-
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    {property.amenities.map((item, index) => (
+                      <span
+                        key={index}
+                        className="flex items-center gap-2 rounded-xl bg-emerald-50 px-4 py-2 text-sm text-emerald-700"
+                      >
+                        <CheckCircle size={16} />
+                        {item}
+                      </span>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
             {/* Contact Owner */}
             <div className="mt-10 rounded-2xl border border-gray-200 bg-gray-50 p-5 sm:p-7">
-
               <h2 className="text-xl font-bold text-gray-900">
                 Contact Property Owner
               </h2>
 
               <div className="mt-5 flex items-center gap-4">
-
                 <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
                   <UserRound size={28} />
                 </div>
 
                 <div>
                   <h3 className="font-bold text-gray-900">
-                    {owner.fullName || owner.userName || "Property Owner"}
+                    {owner.fullName ||
+                      owner.userName ||
+                      "Property Owner"}
                   </h3>
 
                   <p className="text-sm text-gray-500">
                     Property Seller / Owner
                   </p>
                 </div>
-
               </div>
 
               <div className="mt-6 flex flex-wrap gap-3">
-
-                {owner.phone && (
+                {phone && (
                   <a
-                    href={`tel:${owner.phone}`}
+                    href={`tel:${phone}`}
                     className="flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 font-semibold text-white hover:bg-emerald-700"
                   >
                     <Phone size={18} />
@@ -481,7 +468,7 @@ export default function PropertyDetails() {
                       `Hello, I am interested in your property: ${property.name}`
                     )}`}
                     target="_blank"
-                    rel="noreferrer"
+                    rel="noopener noreferrer"
                     className="flex items-center gap-2 rounded-xl bg-green-600 px-5 py-3 font-semibold text-white hover:bg-green-700"
                   >
                     <MessageCircle size={18} />
@@ -489,18 +476,14 @@ export default function PropertyDetails() {
                   </a>
                 )}
 
-                {!owner.phone && (
+                {!phone && (
                   <p className="text-sm text-gray-500">
                     Owner contact number is not available.
                   </p>
                 )}
-
               </div>
-
             </div>
-
           </div>
-          
         </div>
       </div>
 
@@ -510,7 +493,6 @@ export default function PropertyDetails() {
           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 p-3 sm:p-8"
           onClick={() => setIsImageOpen(false)}
         >
-
           {/* Close Button */}
           <button
             type="button"
@@ -546,6 +528,10 @@ export default function PropertyDetails() {
             src={getImageUrl(images[activeImage])}
             alt={`${property.name} - Image ${activeImage + 1}`}
             onClick={(e) => e.stopPropagation()}
+            onError={(e) => {
+              e.currentTarget.onerror = null;
+              e.currentTarget.style.display = "none";
+            }}
             className="max-h-[80vh] max-w-full rounded-lg object-contain"
           />
 
@@ -573,7 +559,7 @@ export default function PropertyDetails() {
               {images.map((image, index) => (
                 <button
                   type="button"
-                  key={`${image}-fullscreen-${index}`}
+                  key={index}
                   onClick={() => setActiveImage(index)}
                   className={`h-12 w-16 shrink-0 overflow-hidden rounded-lg border-2 ${
                     activeImage === index
@@ -584,18 +570,21 @@ export default function PropertyDetails() {
                   <img
                     src={getImageUrl(image)}
                     alt={`Thumbnail ${index + 1}`}
+                    onError={(e) => {
+                      e.currentTarget.onerror = null;
+                      e.currentTarget.style.display = "none";
+                    }}
                     className="h-full w-full object-cover"
                   />
                 </button>
               ))}
             </div>
           )}
-
         </div>
       )}
-      
-      <WriteReview propertyId={property._id} />
 
+      {/* Write Review */}
+      <WriteReview propertyId={property._id} />
     </div>
   );
 }
