@@ -1,17 +1,14 @@
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   Home,
   CheckCircle2,
   Clock,
   Eye,
-  TrendingUp,
-  TrendingDown,
   Plus,
   ArrowUpRight,
   MapPin,
   RefreshCw,
-  Users,
 } from "lucide-react";
 
 import {
@@ -27,14 +24,33 @@ import {
 import { Link } from "react-router-dom";
 import API from "../../services/api";
 
-const API_URL = "http://localhost:5000";
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL ||
+  "https://roadtohome-api.onrender.com/api";
+
+const IMAGE_BASE_URL = API_BASE_URL.replace(/\/api\/?$/, "");
 
 const getImageUrl = (image) => {
   if (!image) return "/Images/placeholder.jpg";
 
-  if (image.startsWith("http")) return image;
+  if (typeof image === "object") {
+    image = image.url || image.path || "";
+  }
 
-  return `${API_URL}${image.startsWith("/") ? "" : "/"}${image}`;
+  if (typeof image !== "string" || !image.trim()) {
+    return "/Images/placeholder.jpg";
+  }
+
+  image = image.trim();
+
+  if (/^https?:\/\//i.test(image)) {
+    return image.replace(
+      /^https?:\/\/(localhost|127\.0\.0\.1):5000/i,
+      IMAGE_BASE_URL
+    );
+  }
+
+  return `${IMAGE_BASE_URL}/${image.replace(/^\/+/, "")}`;
 };
 
 const Overview = () => {
@@ -43,7 +59,7 @@ const Overview = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const fetchOverview = async () => {
+  const fetchOverview = useCallback(async () => {
     try {
       setLoading(true);
       setError("");
@@ -52,22 +68,24 @@ const Overview = () => {
         params: { period: filter },
       });
 
-      setOverview(response.data.overview || response.data);
+      const data = response.data?.overview || response.data?.data || response.data;
+
+      setOverview(data || {});
     } catch (err) {
       console.error("Overview Error:", err);
 
       setError(
         err.response?.data?.message ||
-        "Dashboard data load nahi ho paya."
+          "Dashboard data load nahi ho paya."
       );
     } finally {
       setLoading(false);
     }
-  };
+  }, [filter]);
 
   useEffect(() => {
     fetchOverview();
-  }, [filter]);
+  }, [fetchOverview]);
 
   const stats = [
     {
@@ -100,26 +118,34 @@ const Overview = () => {
     },
   ];
 
-  const chartData = overview?.chartData || [];
-  const properties = overview?.recentProperties || [];
+  const chartData = Array.isArray(overview?.chartData)
+    ? overview.chartData
+    : [];
+
+  const properties = Array.isArray(overview?.recentProperties)
+    ? overview.recentProperties
+    : [];
 
   if (loading && !overview) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <RefreshCw className="animate-spin text-orange-600" size={30} />
-        <span className="ml-3 text-gray-500">Loading dashboard...</span>
+        <span className="ml-3 text-gray-500">
+          Loading dashboard...
+        </span>
       </div>
     );
   }
 
   if (error && !overview) {
     return (
-      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4">
+      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 px-4">
         <p className="text-center text-red-500">{error}</p>
 
         <button
           onClick={fetchOverview}
-          className="rounded-xl bg-orange-600 px-5 py-2.5 text-white hover:bg-orange-700"
+          disabled={loading}
+          className="rounded-xl bg-orange-600 px-5 py-2.5 text-white hover:bg-orange-700 disabled:opacity-60"
         >
           Try Again
         </button>
@@ -149,7 +175,7 @@ const Overview = () => {
 
           <Link
             to="/dashboard/add-property"
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-600 px-5 py-3 text-sm font-semibold text-white shadow-lg transition hover:-trangray-y-0.5 hover:bg-orange-700"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-600 px-5 py-3 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:bg-orange-700"
           >
             <Plus size={18} />
             Add Property
@@ -164,10 +190,12 @@ const Overview = () => {
             return (
               <div
                 key={stat.title}
-                className={`group rounded-2xl border border-gray-200 ${stat.bgColor} p-5 shadow-sm transition duration-300 hover:-trangray-y-1 hover:shadow-lg`}
+                className={`group rounded-2xl border border-gray-200 ${stat.bgColor} p-5 shadow-sm transition duration-300 hover:-translate-y-1 hover:shadow-lg`}
               >
                 <div className="flex items-center justify-between">
-                  <div className={`flex h-12 w-12 items-center justify-center rounded-xl ${stat.color}`}>
+                  <div
+                    className={`flex h-12 w-12 items-center justify-center rounded-xl ${stat.color}`}
+                  >
                     <Icon size={23} />
                   </div>
                 </div>
@@ -234,8 +262,16 @@ const Overview = () => {
                       x2="0"
                       y2="1"
                     >
-                      <stop offset="0%" stopColor="#F97316" stopOpacity={0.3} />
-                      <stop offset="100%" stopColor="#F97316" stopOpacity={0} />
+                      <stop
+                        offset="0%"
+                        stopColor="#F97316"
+                        stopOpacity={0.3}
+                      />
+                      <stop
+                        offset="100%"
+                        stopColor="#F97316"
+                        stopOpacity={0}
+                      />
                     </linearGradient>
                   </defs>
 
@@ -320,8 +356,11 @@ const Overview = () => {
                     <div className="h-44 w-full shrink-0 overflow-hidden rounded-xl bg-gray-100 sm:h-20 sm:w-28">
                       <img
                         src={getImageUrl(image)}
-                        alt={property.name}
+                        alt={property.name || "Property"}
                         loading="lazy"
+                        onError={(e) => {
+                          e.currentTarget.src = "/Images/placeholder.jpg";
+                        }}
                         className="h-full w-full object-cover transition duration-500 group-hover:scale-110"
                       />
                     </div>
@@ -329,11 +368,11 @@ const Overview = () => {
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="font-semibold text-gray-900">
-                          {property.name}
+                          {property.name || "Untitled Property"}
                         </h3>
 
                         <span className="rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-600">
-                          {property.listingType}
+                          {property.listingType || "N/A"}
                         </span>
                       </div>
 
@@ -342,7 +381,9 @@ const Overview = () => {
                         {[
                           location.city,
                           location.state,
-                        ].filter(Boolean).join(", ") || location.address || "Location not available"}
+                        ].filter(Boolean).join(", ") ||
+                          location.address ||
+                          "Location not available"}
                       </p>
 
                       <p className="mt-2 font-bold text-gray-900">
@@ -366,7 +407,7 @@ const Overview = () => {
 
                       <Link
                         to={`/dashboard/properties/${property._id}`}
-                        aria-label={`View ${property.name}`}
+                        aria-label={`View ${property.name || "property"}`}
                         className="rounded-lg p-2 text-gray-400 transition hover:bg-orange-50 hover:text-orange-600"
                       >
                         <Eye size={18} />
@@ -392,7 +433,6 @@ const Overview = () => {
             </Link>
           </div>
         </section>
-
       </div>
     </div>
   );

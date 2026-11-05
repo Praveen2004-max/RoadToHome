@@ -6,7 +6,6 @@ import {
   Plus,
   MapPin,
   Eye,
-  Pencil,
   Trash2,
   SlidersHorizontal,
   Home,
@@ -18,11 +17,85 @@ import {
   deleteProperty,
 } from "../../services/propertyService";
 
+// Render backend URL
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL ||
+  "https://roadtohome-api.onrender.com/api";
+
+const BACKEND_URL = API_BASE_URL.replace(/\/api\/?$/, "");
+
+const FALLBACK_IMAGE = "/Images/placeholder.jpg";
+
 const statusStyles = {
   Available: "bg-emerald-50 text-emerald-700",
   Sold: "bg-blue-50 text-blue-700",
   Rented: "bg-purple-50 text-purple-700",
   Pending: "bg-amber-50 text-amber-700",
+};
+
+// Get location text
+const getLocation = (location) => {
+  if (!location) return "Location not specified";
+
+  if (typeof location === "string") return location;
+
+  return (
+    [
+      location.city,
+      location.state,
+      location.country,
+    ]
+      .filter(Boolean)
+      .join(", ") ||
+    location.address ||
+    "Location not specified"
+  );
+};
+
+// Get image URL
+const getImageUrl = (images) => {
+  const image = Array.isArray(images)
+    ? images[0]
+    : images;
+
+  if (!image) return FALLBACK_IMAGE;
+
+  let path =
+    typeof image === "string"
+      ? image
+      : image.url || image.path || "";
+
+  if (typeof path !== "string" || !path.trim()) {
+    return FALLBACK_IMAGE;
+  }
+
+  path = path.trim();
+
+  if (/^https?:\/\//i.test(path)) {
+    return path.replace(
+      /^https?:\/\/(localhost|127\.0\.0\.1):5000/i,
+      BACKEND_URL
+    );
+  }
+
+  return `${BACKEND_URL}/${path.replace(/^\/+/, "")}`;
+};
+
+// Format price
+const formatPrice = (price) => {
+  if (price === undefined || price === null || price === "") {
+    return "Price on request";
+  }
+
+  const amount = Number(price);
+
+  if (!Number.isFinite(amount)) return "Price on request";
+
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(amount);
 };
 
 export default function Properties() {
@@ -34,6 +107,7 @@ export default function Properties() {
   const [type, setType] = useState("All");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [deletingId, setDeletingId] = useState(null);
 
   // Fetch all properties
   const fetchProperties = async () => {
@@ -43,20 +117,24 @@ export default function Properties() {
 
       const response = await getAllProperties();
 
-      console.log("Properties API Response:", response);
-
-      // API response structure handle
+      // Handle different API response formats
       const data = Array.isArray(response)
         ? response
-        : response.properties || response.data?.properties || response.data || [];
+        : response?.properties ||
+          response?.data?.properties ||
+          response?.data ||
+          [];
 
       setProperties(Array.isArray(data) ? data : []);
     } catch (err) {
-      console.error("Fetch properties error:", err);
+      console.error(
+        "Fetch Properties Error:",
+        err.response?.data || err
+      );
 
       setError(
         err.response?.data?.message ||
-        "Properties load nahi ho payi. Backend connection check karein."
+          "Properties load nahi ho payi. Backend connection check karein."
       );
     } finally {
       setLoading(false);
@@ -69,6 +147,8 @@ export default function Properties() {
 
   // Delete property
   const handleDelete = async (id) => {
+    if (!id) return;
+
     const confirmed = window.confirm(
       "Kya aap is property ko permanently delete karna chahte hain?"
     );
@@ -76,47 +156,28 @@ export default function Properties() {
     if (!confirmed) return;
 
     try {
+      setDeletingId(id);
+
       await deleteProperty(id);
 
       setProperties((current) =>
-        current.filter((property) => property._id !== id)
+        current.filter(
+          (property) => String(property._id) !== String(id)
+        )
       );
     } catch (err) {
-      console.error("Delete property error:", err);
-
-      alert(
-        err.response?.data?.message ||
-        "Property delete nahi ho payi."
+      console.error(
+        "Delete Property Error:",
+        err.response?.data || err
       );
+
+      window.alert(
+        err.response?.data?.message ||
+          "Property delete nahi ho payi."
+      );
+    } finally {
+      setDeletingId(null);
     }
-  };
-
-  // Get location text
-  const getLocation = (location) => {
-    if (!location) return "Location not specified";
-
-    if (typeof location === "string") return location;
-
-    return [
-      location.city,
-      location.state,
-      location.country,
-    ]
-      .filter(Boolean)
-      .join(", ") || location.address || "Location not specified";
-  };
-
-  // Get image URL
-  const getImageUrl = (images) => {
-    const image = Array.isArray(images) ? images[0] : images;
-
-    if (!image) return "/Images/placeholder.jpg";
-
-    if (image.startsWith("http")) return image;
-
-    return `http://localhost:5000${
-      image.startsWith("/") ? "" : "/"
-    }${image}`;
   };
 
   // Search and filters
@@ -125,9 +186,11 @@ export default function Properties() {
     const propertyLocation = getLocation(property.location);
     const listingType = property.listingType || "";
 
+    const searchText = search.toLowerCase();
+
     const matchesSearch =
-      propertyName.toLowerCase().includes(search.toLowerCase()) ||
-      propertyLocation.toLowerCase().includes(search.toLowerCase());
+      propertyName.toLowerCase().includes(searchText) ||
+      propertyLocation.toLowerCase().includes(searchText);
 
     const matchesStatus =
       status === "All" || property.status === status;
@@ -150,14 +213,6 @@ export default function Properties() {
   const rentCount = properties.filter(
     (property) => property.listingType === "For Rent"
   ).length;
-
-  // Format price
-  const formatPrice = (price) =>
-    new Intl.NumberFormat("en-IN", {
-      style: "currency",
-      currency: "INR",
-      maximumFractionDigits: 0,
-    }).format(Number(price) || 0);
 
   const stats = [
     {
@@ -193,7 +248,7 @@ export default function Properties() {
   return (
     <div className="min-h-screen w-full bg-slate-50 p-4 sm:p-6 lg:p-8">
 
-      {/* Header */}
+      {/* HEADER */}
       <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="mb-1 text-sm font-medium text-emerald-700">
@@ -210,6 +265,7 @@ export default function Properties() {
         </div>
 
         <button
+          type="button"
           onClick={() => navigate("/dashboard/add-property")}
           className="flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 font-semibold text-white shadow-sm transition hover:bg-emerald-700"
         >
@@ -218,7 +274,7 @@ export default function Properties() {
         </button>
       </div>
 
-      {/* Summary Cards */}
+      {/* SUMMARY CARDS */}
       <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {stats.map((item) => {
           const Icon = item.icon;
@@ -230,7 +286,10 @@ export default function Properties() {
             >
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-slate-500">{item.label}</p>
+                  <p className="text-sm text-slate-500">
+                    {item.label}
+                  </p>
+
                   <h2 className="mt-2 text-3xl font-bold text-slate-900">
                     {item.value}
                   </h2>
@@ -245,7 +304,7 @@ export default function Properties() {
         })}
       </div>
 
-      {/* Search and Filters */}
+      {/* SEARCH AND FILTERS */}
       <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
           <div className="relative flex-1">
@@ -287,16 +346,21 @@ export default function Properties() {
           </select>
 
           <button
+            type="button"
             onClick={fetchProperties}
-            className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-3 text-sm transition hover:bg-slate-50"
+            disabled={loading}
+            className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-3 text-sm transition hover:bg-slate-50 disabled:opacity-50"
           >
-            <RefreshCw size={17} />
+            <RefreshCw
+              size={17}
+              className={loading ? "animate-spin" : ""}
+            />
             Refresh
           </button>
         </div>
       </div>
 
-      {/* Listing heading */}
+      {/* LISTING HEADING */}
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-lg font-bold text-slate-900">
           All Listings
@@ -307,25 +371,27 @@ export default function Properties() {
         </p>
       </div>
 
-      {/* Loading */}
+      {/* LOADING */}
       {loading && (
         <div className="rounded-2xl border border-slate-200 bg-white py-16 text-center">
           <RefreshCw
             size={30}
             className="mx-auto animate-spin text-emerald-600"
           />
+
           <p className="mt-3 text-sm text-slate-500">
             Loading properties...
           </p>
         </div>
       )}
 
-      {/* Error */}
+      {/* ERROR */}
       {!loading && error && (
         <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
           <p className="text-red-700">{error}</p>
 
           <button
+            type="button"
             onClick={fetchProperties}
             className="mt-3 font-semibold text-red-700 underline"
           >
@@ -334,10 +400,13 @@ export default function Properties() {
         </div>
       )}
 
-      {/* Empty State */}
+      {/* EMPTY STATE */}
       {!loading && !error && filteredProperties.length === 0 && (
         <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-16 text-center">
-          <Home className="mx-auto mb-3 text-slate-400" size={38} />
+          <Home
+            className="mx-auto mb-3 text-slate-400"
+            size={38}
+          />
 
           <h3 className="font-semibold text-slate-800">
             No properties found
@@ -348,6 +417,7 @@ export default function Properties() {
           </p>
 
           <button
+            type="button"
             onClick={() => navigate("/dashboard/add-property")}
             className="mt-5 rounded-xl bg-emerald-600 px-5 py-3 font-semibold text-white hover:bg-emerald-700"
           >
@@ -356,25 +426,26 @@ export default function Properties() {
         </div>
       )}
 
-      {/* Property Cards */}
+      {/* PROPERTY CARDS */}
       {!loading && !error && filteredProperties.length > 0 && (
         <div className="grid grid-cols-1 gap-5 md:grid-cols-2 2xl:grid-cols-3">
           {filteredProperties.map((property) => {
+            const propertyId = property._id;
             const propertyStatus = property.status || "Available";
 
             return (
               <div
-                key={property._id}
+                key={propertyId}
                 className="group overflow-hidden rounded-2xl border border-slate-200 bg-white transition duration-300 hover:-translate-y-1 hover:shadow-xl"
               >
-                {/* Image */}
-                <div className="relative h-52 overflow-hidden">
+                {/* IMAGE */}
+                <div className="relative h-52 overflow-hidden bg-slate-100">
                   <img
-                    src={getImageUrl(property.images)}
+                    src={getImageUrl(property.images || property.image)}
                     alt={property.name || "Property"}
                     onError={(e) => {
                       e.currentTarget.onerror = null;
-                      e.currentTarget.src = "/Images/placeholder.jpg";
+                      e.currentTarget.src = FALLBACK_IMAGE;
                     }}
                     className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
                   />
@@ -385,14 +456,15 @@ export default function Properties() {
 
                   <span
                     className={`absolute right-4 top-4 rounded-lg px-3 py-1.5 text-xs font-semibold ${
-                      statusStyles[propertyStatus] || statusStyles.Pending
+                      statusStyles[propertyStatus] ||
+                      "bg-slate-100 text-slate-700"
                     }`}
                   >
                     {propertyStatus}
                   </span>
                 </div>
 
-                {/* Details */}
+                {/* DETAILS */}
                 <div className="p-5">
                   <div className="mb-3 flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -442,11 +514,12 @@ export default function Properties() {
                     </div>
                   </div>
 
-                  {/* Actions */}
+                  {/* ACTIONS */}
                   <div className="flex gap-3 border-t border-slate-100 pt-4">
                     <button
+                      type="button"
                       onClick={() =>
-                        navigate(`/properties/${property._id}`)
+                        navigate(`/properties/${propertyId}`)
                       }
                       className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-slate-200 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
                     >
@@ -455,11 +528,17 @@ export default function Properties() {
                     </button>
 
                     <button
-                      onClick={() => handleDelete(property._id)}
-                      aria-label={`Delete ${property.name}`}
-                      className="flex items-center justify-center rounded-xl border border-red-100 px-3 text-red-600 transition hover:bg-red-50"
+                      type="button"
+                      onClick={() => handleDelete(propertyId)}
+                      disabled={deletingId === propertyId}
+                      aria-label={`Delete ${property.name || "property"}`}
+                      className="flex items-center justify-center rounded-xl border border-red-100 px-3 text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      <Trash2 size={17} />
+                      {deletingId === propertyId ? (
+                        <RefreshCw size={17} className="animate-spin" />
+                      ) : (
+                        <Trash2 size={17} />
+                      )}
                     </button>
                   </div>
                 </div>

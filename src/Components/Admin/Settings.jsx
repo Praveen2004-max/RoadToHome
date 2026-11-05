@@ -1,3 +1,4 @@
+
 import { useEffect, useState } from "react";
 import {
   UserRound,
@@ -15,6 +16,33 @@ import {
 } from "lucide-react";
 
 import API from "../../services/api";
+
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL ||
+  "https://roadtohome-api.onrender.com/api";
+
+const IMAGE_BASE_URL = API_BASE_URL.replace(/\/api\/?$/, "");
+
+const getImageUrl = (image) => {
+  if (!image) return "";
+
+  if (typeof image === "object") {
+    image = image.url || image.path || "";
+  }
+
+  if (typeof image !== "string" || !image.trim()) return "";
+
+  image = image.trim();
+
+  if (/^https?:\/\//i.test(image)) {
+    return image.replace(
+      /^https?:\/\/(localhost|127\.0\.0\.1):5000/i,
+      IMAGE_BASE_URL
+    );
+  }
+
+  return `${IMAGE_BASE_URL}/${image.replace(/^\/+/, "")}`;
+};
 
 const DEFAULT_NOTIFICATIONS = {
   bookings: true,
@@ -34,7 +62,10 @@ const DEFAULT_PREFERENCES = {
 const readStoredSettings = (key, defaults) => {
   try {
     const stored = localStorage.getItem(key);
-    return stored ? { ...defaults, ...JSON.parse(stored) } : defaults;
+
+    return stored
+      ? { ...defaults, ...JSON.parse(stored) }
+      : defaults;
   } catch {
     return defaults;
   }
@@ -46,6 +77,7 @@ const Settings = () => {
   const [saving, setSaving] = useState(false);
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
+
   const [profileImage, setProfileImage] = useState(null);
   const [imagePreview, setImagePreview] = useState("");
   const [error, setError] = useState("");
@@ -65,11 +97,17 @@ const Settings = () => {
   });
 
   const [notifications, setNotifications] = useState(() =>
-    readStoredSettings("RoadToHomeNotifications", DEFAULT_NOTIFICATIONS)
+    readStoredSettings(
+      "RoadToHomeNotifications",
+      DEFAULT_NOTIFICATIONS
+    )
   );
 
   const [preferences, setPreferences] = useState(() =>
-    readStoredSettings("RoadToHomePreferences", DEFAULT_PREFERENCES)
+    readStoredSettings(
+      "RoadToHomePreferences",
+      DEFAULT_PREFERENCES
+    )
   );
 
   const tabs = [
@@ -83,8 +121,10 @@ const Settings = () => {
   const inputClass =
     "w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-500/10";
 
-  const labelClass = "mb-2 block text-sm font-medium text-slate-700";
+  const labelClass =
+    "mb-2 block text-sm font-medium text-slate-700";
 
+  // Fetch logged-in user profile
   useEffect(() => {
     let isMounted = true;
 
@@ -94,9 +134,14 @@ const Settings = () => {
         setError("");
 
         const response = await API.get("/users/profile");
-        const user = response.data.user;
 
-        if (!isMounted) return;
+        const user =
+          response.data?.user ||
+          response.data?.data?.user ||
+          response.data?.data ||
+          response.data;
+
+        if (!isMounted || !user) return;
 
         setProfile({
           fullName: user.fullName || "",
@@ -107,14 +152,15 @@ const Settings = () => {
         });
 
         if (user.profileImage) {
-          setImagePreview(
-            user.profileImage.startsWith("http")
-              ? user.profileImage
-              : `http://localhost:5000${user.profileImage}`
-          );
+          setImagePreview(getImageUrl(user.profileImage));
         }
       } catch (err) {
         if (isMounted) {
+          console.error(
+            "Fetch profile error:",
+            err.response?.data || err
+          );
+
           setError(
             err.response?.data?.message ||
               "Unable to load profile information."
@@ -132,6 +178,7 @@ const Settings = () => {
     };
   }, []);
 
+  // Revoke temporary image preview URL
   useEffect(() => {
     return () => {
       if (imagePreview.startsWith("blob:")) {
@@ -140,13 +187,22 @@ const Settings = () => {
     };
   }, [imagePreview]);
 
+  // Update profile inputs
   const updateProfile = (e) => {
     const { name, value } = e.target;
-    setProfile((prev) => ({ ...prev, [name]: value }));
+
+    setProfile((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+
+    setSaved(false);
   };
 
+  // Select profile image
   const handleImageChange = (e) => {
     const file = e.target.files?.[0];
+
     if (!file) return;
 
     if (!file.type.startsWith("image/")) {
@@ -160,15 +216,19 @@ const Settings = () => {
     }
 
     setError("");
+    setSaved(false);
     setProfileImage(file);
     setImagePreview(URL.createObjectURL(file));
   };
 
+  // Save settings
   const handleSave = async (e) => {
     e.preventDefault();
+
     setError("");
     setSaved(false);
 
+    // Security tab
     if (activeTab === "security") {
       if (!password.current) {
         setError("Please enter your current password.");
@@ -176,47 +236,67 @@ const Settings = () => {
       }
 
       if (password.newPassword.length < 8) {
-        setError("New password must contain at least 8 characters.");
+        setError(
+          "New password must contain at least 8 characters."
+        );
         return;
       }
 
       if (password.newPassword !== password.confirm) {
-        setError("New password and confirmation do not match.");
+        setError(
+          "New password and confirmation do not match."
+        );
         return;
       }
 
       setError(
-        "Password changes are not connected to the backend yet."
+        "Password change API is not connected yet. Please add a backend password update route."
       );
       return;
     }
 
+    // Notifications tab
     if (activeTab === "notifications") {
-      localStorage.setItem(
-        "RoadToHomeNotifications",
-        JSON.stringify(notifications)
-      );
-      setSaved(true);
+      try {
+        localStorage.setItem(
+          "RoadToHomeNotifications",
+          JSON.stringify(notifications)
+        );
+
+        setSaved(true);
+      } catch {
+        setError("Unable to save notification preferences.");
+      }
+
       return;
     }
 
+    // Preferences tab
     if (activeTab === "preferences") {
-      localStorage.setItem(
-        "RoadToHomePreferences",
-        JSON.stringify(preferences)
-      );
-      setSaved(true);
+      try {
+        localStorage.setItem(
+          "RoadToHomePreferences",
+          JSON.stringify(preferences)
+        );
+
+        setSaved(true);
+      } catch {
+        setError("Unable to save preferences.");
+      }
+
       return;
     }
 
+    // Profile tab
     if (activeTab !== "profile") return;
 
     try {
       setSaving(true);
 
       const formData = new FormData();
-      formData.append("fullName", profile.fullName);
-      formData.append("email", profile.email);
+
+      formData.append("fullName", profile.fullName.trim());
+      formData.append("email", profile.email.trim());
       formData.append("phone", profile.phone);
       formData.append("location", profile.location);
 
@@ -224,8 +304,16 @@ const Settings = () => {
         formData.append("image", profileImage);
       }
 
-      const response = await API.put("/users/profile", formData);
-      const updatedUser = response.data.user;
+      const response = await API.put(
+        "/users/profile",
+        formData
+      );
+
+      const updatedUser =
+        response.data?.user ||
+        response.data?.data?.user ||
+        response.data?.data ||
+        response.data;
 
       setProfile((prev) => ({
         ...prev,
@@ -236,9 +324,39 @@ const Settings = () => {
         role: updatedUser.role || prev.role,
       }));
 
+      // Update localStorage user information
+      try {
+        const storedUser = JSON.parse(
+          localStorage.getItem("user") || "{}"
+        );
+
+        const updatedLocalUser = {
+          ...storedUser,
+          ...updatedUser,
+        };
+
+        localStorage.setItem(
+          "user",
+          JSON.stringify(updatedLocalUser)
+        );
+
+        window.dispatchEvent(new Event("authChanged"));
+      } catch (storageError) {
+        console.error("Local user update error:", storageError);
+      }
+
+      if (updatedUser.profileImage) {
+        setImagePreview(getImageUrl(updatedUser.profileImage));
+      }
+
       setProfileImage(null);
       setSaved(true);
     } catch (err) {
+      console.error(
+        "Update profile error:",
+        err.response?.data || err
+      );
+
       setError(
         err.response?.data?.message ||
           "Unable to save profile changes."
@@ -248,42 +366,58 @@ const Settings = () => {
     }
   };
 
+  // Toggle notification
   const toggleNotification = (key) => {
     setNotifications((prev) => ({
       ...prev,
       [key]: !prev[key],
     }));
+
     setSaved(false);
   };
 
+  // Update preferences
   const updatePreference = (key, value) => {
     setPreferences((prev) => ({
       ...prev,
       [key]: value,
     }));
+
     setSaved(false);
   };
 
+  // Logout
   const handleLogout = () => {
-    const confirmed = window.confirm("Are you sure you want to log out?");
+    const confirmed = window.confirm(
+      "Are you sure you want to log out?"
+    );
+
     if (!confirmed) return;
 
     localStorage.removeItem("token");
     localStorage.removeItem("user");
     localStorage.removeItem("RoadToHomeUser");
 
+    window.dispatchEvent(new Event("authChanged"));
+
     window.location.href = "/";
   };
 
+  // Apply theme and persist preferences
   useEffect(() => {
-    const isDark = preferences.theme === "dark";
-
-    document.documentElement.classList.toggle("dark", isDark);
-
-    localStorage.setItem(
-      "RoadToHomePreferences",
-      JSON.stringify(preferences)
+    document.documentElement.classList.toggle(
+      "dark",
+      preferences.theme === "dark"
     );
+
+    try {
+      localStorage.setItem(
+        "RoadToHomePreferences",
+        JSON.stringify(preferences)
+      );
+    } catch (err) {
+      console.error("Preference storage error:", err);
+    }
   }, [preferences]);
 
   return (
@@ -312,7 +446,8 @@ const Settings = () => {
             {imagePreview ? (
               <img
                 src={imagePreview}
-                alt="Admin profile"
+                alt="User profile"
+                onError={() => setImagePreview("")}
                 className="h-11 w-11 rounded-xl object-cover"
               />
             ) : (
@@ -323,8 +458,9 @@ const Settings = () => {
 
             <div>
               <p className="font-semibold text-slate-800">
-                {profile.fullName || "Admin"}
+                {profile.fullName || "User"}
               </p>
+
               <p className="text-xs capitalize text-slate-500">
                 {profile.role}
               </p>
@@ -332,6 +468,7 @@ const Settings = () => {
           </div>
         </div>
 
+        {/* Success */}
         {saved && (
           <div className="mb-5 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-700">
             <CheckCircle2 size={18} />
@@ -339,6 +476,7 @@ const Settings = () => {
           </div>
         )}
 
+        {/* Error */}
         {error && (
           <div className="mb-5 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
             {error}
@@ -385,17 +523,22 @@ const Settings = () => {
               </div>
 
               <div className="mt-6 hidden rounded-xl bg-slate-50 p-4 lg:block">
-                <ShieldCheck className="mb-3 text-sky-600" size={24} />
+                <ShieldCheck
+                  className="mb-3 text-sky-600"
+                  size={24}
+                />
+
                 <p className="text-sm font-semibold text-slate-800">
                   Keep your account secure
                 </p>
+
                 <p className="mt-1 text-xs leading-5 text-slate-500">
                   Use a strong password and keep your account details updated.
                 </p>
               </div>
             </aside>
 
-            {/* Main content */}
+            {/* Main Content */}
             <main className="min-w-0 rounded-2xl border border-slate-200 bg-white shadow-sm">
               {/* Profile */}
               {activeTab === "profile" && (
@@ -406,6 +549,7 @@ const Settings = () => {
                   />
 
                   <div className="space-y-6 p-5 sm:p-7">
+                    {/* Profile Image */}
                     <div className="flex flex-wrap items-center gap-4">
                       {imagePreview ? (
                         <img
@@ -415,7 +559,7 @@ const Settings = () => {
                         />
                       ) : (
                         <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-sky-100 text-3xl font-bold text-sky-700">
-                          {(profile.fullName || "A")
+                          {(profile.fullName || "U")
                             .charAt(0)
                             .toUpperCase()}
                         </div>
@@ -425,6 +569,7 @@ const Settings = () => {
                         <p className="font-semibold text-slate-800">
                           Profile photo
                         </p>
+
                         <p className="mt-1 text-xs text-slate-500">
                           JPG, PNG or WebP. Maximum 5 MB.
                         </p>
@@ -432,6 +577,7 @@ const Settings = () => {
                         <label className="mt-3 inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">
                           <Camera size={15} />
                           Change photo
+
                           <input
                             type="file"
                             accept="image/jpeg,image/png,image/webp"
@@ -442,9 +588,13 @@ const Settings = () => {
                       </div>
                     </div>
 
+                    {/* Profile Fields */}
                     <div className="grid gap-5 sm:grid-cols-2">
                       <div>
-                        <label className={labelClass}>Full name</label>
+                        <label className={labelClass}>
+                          Full name
+                        </label>
+
                         <input
                           className={inputClass}
                           name="fullName"
@@ -455,7 +605,10 @@ const Settings = () => {
                       </div>
 
                       <div>
-                        <label className={labelClass}>Email address</label>
+                        <label className={labelClass}>
+                          Email address
+                        </label>
+
                         <input
                           className={inputClass}
                           type="email"
@@ -467,7 +620,10 @@ const Settings = () => {
                       </div>
 
                       <div>
-                        <label className={labelClass}>Phone number</label>
+                        <label className={labelClass}>
+                          Phone number
+                        </label>
+
                         <input
                           className={inputClass}
                           type="tel"
@@ -478,7 +634,10 @@ const Settings = () => {
                       </div>
 
                       <div>
-                        <label className={labelClass}>Role</label>
+                        <label className={labelClass}>
+                          Role
+                        </label>
+
                         <input
                           className={`${inputClass} bg-slate-50`}
                           value={profile.role}
@@ -487,12 +646,16 @@ const Settings = () => {
                       </div>
 
                       <div className="sm:col-span-2">
-                        <label className={labelClass}>Location</label>
+                        <label className={labelClass}>
+                          Location
+                        </label>
+
                         <input
                           className={inputClass}
                           name="location"
                           value={profile.location}
                           onChange={updateProfile}
+                          placeholder="Enter your location"
                         />
                       </div>
                     </div>
@@ -512,12 +675,24 @@ const Settings = () => {
 
                   <div className="max-w-2xl space-y-5 p-5 sm:p-7">
                     {[
-                      { key: "current", label: "Current password" },
-                      { key: "newPassword", label: "New password" },
-                      { key: "confirm", label: "Confirm new password" },
+                      {
+                        key: "current",
+                        label: "Current password",
+                      },
+                      {
+                        key: "newPassword",
+                        label: "New password",
+                      },
+                      {
+                        key: "confirm",
+                        label: "Confirm new password",
+                      },
                     ].map((field) => (
                       <div key={field.key}>
-                        <label className={labelClass}>{field.label}</label>
+                        <label className={labelClass}>
+                          {field.label}
+                        </label>
+
                         <div className="relative">
                           <input
                             className={`${inputClass} pr-12`}
@@ -531,7 +706,9 @@ const Settings = () => {
                             }
                             required
                             minLength={
-                              field.key === "current" ? undefined : 8
+                              field.key === "current"
+                                ? undefined
+                                : 8
                             }
                           />
 
@@ -542,7 +719,9 @@ const Settings = () => {
                             }
                             className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
                             aria-label={
-                              showPassword ? "Hide password" : "Show password"
+                              showPassword
+                                ? "Hide password"
+                                : "Show password"
                             }
                           >
                             {showPassword ? (
@@ -557,7 +736,7 @@ const Settings = () => {
 
                     <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-800">
                       Password changes are not connected to the backend yet.
-                      This form only validates the password fields.
+                      This form currently validates the password fields only.
                     </div>
                   </div>
 
@@ -578,27 +757,32 @@ const Settings = () => {
                       {
                         key: "bookings",
                         title: "New bookings",
-                        description: "Get notified when a property is booked.",
+                        description:
+                          "Get notified when a property is booked.",
                       },
                       {
                         key: "messages",
                         title: "Customer messages",
-                        description: "Receive alerts when customers contact you.",
+                        description:
+                          "Receive alerts when customers contact you.",
                       },
                       {
                         key: "newUsers",
                         title: "New user registrations",
-                        description: "Know when a new user joins RoadToHome.",
+                        description:
+                          "Know when a new user joins RoadToHome.",
                       },
                       {
                         key: "weeklyReport",
                         title: "Weekly reports",
-                        description: "Get a weekly summary of website activity.",
+                        description:
+                          "Get a weekly summary of website activity.",
                       },
                       {
                         key: "emailUpdates",
                         title: "Product updates",
-                        description: "Receive updates and feature announcements.",
+                        description:
+                          "Receive updates and feature announcements.",
                       },
                     ].map((item) => (
                       <div
@@ -609,6 +793,7 @@ const Settings = () => {
                           <p className="font-medium text-slate-800">
                             {item.title}
                           </p>
+
                           <p className="mt-1 text-sm text-slate-500">
                             {item.description}
                           </p>
@@ -618,7 +803,9 @@ const Settings = () => {
                           type="button"
                           role="switch"
                           aria-checked={notifications[item.key]}
-                          onClick={() => toggleNotification(item.key)}
+                          onClick={() =>
+                            toggleNotification(item.key)
+                          }
                           className={`relative h-6 w-11 shrink-0 rounded-full transition ${
                             notifications[item.key]
                               ? "bg-sky-600"
@@ -646,18 +833,24 @@ const Settings = () => {
                 <form onSubmit={handleSave}>
                   <SectionHeader
                     title="Preferences"
-                    description="Customize how the admin dashboard is displayed."
+                    description="Customize how the dashboard is displayed."
                   />
 
                   <div className="space-y-6 p-5 sm:p-7">
+                    {/* Theme */}
                     <div>
-                      <label className={labelClass}>Appearance</label>
+                      <label className={labelClass}>
+                        Appearance
+                      </label>
+
                       <div className="grid gap-3 sm:grid-cols-2">
                         {["light", "dark"].map((theme) => (
                           <button
                             type="button"
                             key={theme}
-                            onClick={() => updatePreference("theme", theme)}
+                            onClick={() =>
+                              updatePreference("theme", theme)
+                            }
                             className={`rounded-xl border p-4 text-left transition ${
                               preferences.theme === theme
                                 ? "border-sky-500 bg-sky-50 ring-2 ring-sky-500/10"
@@ -671,9 +864,11 @@ const Settings = () => {
                                   : "border-slate-200 bg-white"
                               }`}
                             />
+
                             <p className="font-semibold capitalize text-slate-800">
                               {theme} mode
                             </p>
+
                             <p className="mt-1 text-xs text-slate-500">
                               {theme === "light"
                                 ? "Bright and clean appearance"
@@ -684,14 +879,21 @@ const Settings = () => {
                       </div>
                     </div>
 
+                    {/* Language and Currency */}
                     <div className="grid gap-5 sm:grid-cols-2">
                       <div>
-                        <label className={labelClass}>Language</label>
+                        <label className={labelClass}>
+                          Language
+                        </label>
+
                         <select
                           className={inputClass}
                           value={preferences.language}
                           onChange={(e) =>
-                            updatePreference("language", e.target.value)
+                            updatePreference(
+                              "language",
+                              e.target.value
+                            )
                           }
                         >
                           <option>English</option>
@@ -700,12 +902,18 @@ const Settings = () => {
                       </div>
 
                       <div>
-                        <label className={labelClass}>Currency</label>
+                        <label className={labelClass}>
+                          Currency
+                        </label>
+
                         <select
                           className={inputClass}
                           value={preferences.currency}
                           onChange={(e) =>
-                            updatePreference("currency", e.target.value)
+                            updatePreference(
+                              "currency",
+                              e.target.value
+                            )
                           }
                         >
                           <option>INR (₹)</option>
@@ -715,12 +923,18 @@ const Settings = () => {
                       </div>
 
                       <div className="sm:col-span-2">
-                        <label className={labelClass}>Time zone</label>
+                        <label className={labelClass}>
+                          Time zone
+                        </label>
+
                         <select
                           className={inputClass}
                           value={preferences.timezone}
                           onChange={(e) =>
-                            updatePreference("timezone", e.target.value)
+                            updatePreference(
+                              "timezone",
+                              e.target.value
+                            )
                           }
                         >
                           <option value="Asia/Kolkata">
@@ -735,9 +949,9 @@ const Settings = () => {
                     </div>
 
                     <p className="text-xs leading-5 text-slate-500">
-                      Preferences are saved in this browser. Applying
-                      dashboard-wide themes, translations, and currency
-                      formatting requires additional implementation.
+                      Preferences are saved in this browser. Dashboard-wide
+                      themes, translations and currency formatting need
+                      additional implementation.
                     </p>
                   </div>
 
@@ -759,10 +973,12 @@ const Settings = () => {
                         <p className="font-semibold text-slate-800">
                           Account status
                         </p>
+
                         <p className="mt-1 text-sm text-slate-500">
                           Current status of your account.
                         </p>
                       </div>
+
                       <span className="w-fit rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
                         Active
                       </span>
@@ -771,22 +987,26 @@ const Settings = () => {
                     <div className="flex flex-col justify-between gap-4 rounded-xl border border-slate-200 p-5 sm:flex-row sm:items-center">
                       <div>
                         <p className="font-semibold text-slate-800">
-                          Administrator access
+                          Account access
                         </p>
+
                         <p className="mt-1 text-sm text-slate-500">
                           Access control is enforced by your backend.
                         </p>
                       </div>
+
                       <span className="w-fit rounded-full bg-sky-50 px-3 py-1.5 text-xs font-semibold capitalize text-sky-700">
                         {profile.role}
                       </span>
                     </div>
 
+                    {/* Logout */}
                     <div className="flex flex-col justify-between gap-4 rounded-xl border border-slate-200 p-5 sm:flex-row sm:items-center">
                       <div>
                         <p className="font-semibold text-slate-800">
                           Log out
                         </p>
+
                         <p className="mt-1 text-sm text-slate-500">
                           Sign out from this device.
                         </p>
@@ -802,14 +1022,17 @@ const Settings = () => {
                       </button>
                     </div>
 
+                    {/* Danger Zone */}
                     <div className="rounded-xl border border-rose-200 bg-rose-50/50 p-5">
                       <h3 className="font-semibold text-rose-700">
                         Danger zone
                       </h3>
+
                       <p className="mt-2 text-sm leading-6 text-slate-600">
                         Account deletion is not connected to the backend.
                         No account will be deleted from this page.
                       </p>
+
                       <button
                         type="button"
                         disabled
@@ -832,8 +1055,13 @@ const Settings = () => {
 function SectionHeader({ title, description }) {
   return (
     <div className="border-b border-slate-100 p-5 sm:p-7">
-      <h2 className="text-xl font-bold text-slate-900">{title}</h2>
-      <p className="mt-1 text-sm text-slate-500">{description}</p>
+      <h2 className="text-xl font-bold text-slate-900">
+        {title}
+      </h2>
+
+      <p className="mt-1 text-sm text-slate-500">
+        {description}
+      </p>
     </div>
   );
 }

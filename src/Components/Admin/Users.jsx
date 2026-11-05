@@ -1,5 +1,5 @@
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Search,
   Users as UsersIcon,
@@ -14,6 +14,29 @@ import {
 
 import API from "../../services/api";
 
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL ||
+  "https://roadtohome-api.onrender.com/api";
+
+const IMAGE_BASE_URL = API_BASE_URL.replace(/\/api\/?$/, "");
+
+const getProfileImageUrl = (image) => {
+  if (!image || typeof image !== "string") return "";
+
+  image = image.trim();
+
+  if (!image) return "";
+
+  if (/^https?:\/\//i.test(image)) {
+    return image.replace(
+      /^https?:\/\/(localhost|127\.0\.0\.1):5000/i,
+      IMAGE_BASE_URL
+    );
+  }
+
+  return `${IMAGE_BASE_URL}/${image.replace(/^\/+/, "")}`;
+};
+
 export default function Users() {
   const [users, setUsers] = useState([]);
   const [search, setSearch] = useState("");
@@ -21,34 +44,36 @@ export default function Users() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Fetch registered users from backend
-  const fetchUsers = async () => {
+  // Fetch registered users
+  const fetchUsers = useCallback(async () => {
     try {
       setLoading(true);
       setError("");
 
       const response = await API.get("/users/admin/all");
 
-      setUsers(
-        response.data.users ||
-        response.data.data ||
-        []
-      );
+      const data =
+        response.data?.users ||
+        response.data?.data?.users ||
+        response.data?.data ||
+        [];
+
+      setUsers(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error("Users Fetch Error:", err);
 
       setError(
         err.response?.data?.message ||
-        "Unable to load users. Please try again."
+          "Unable to load users. Please try again."
       );
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchUsers();
-  }, []);
+  }, [fetchUsers]);
 
   // Search and role filtering
   const filteredUsers = useMemo(() => {
@@ -59,7 +84,7 @@ export default function Users() {
         (user.fullName || "").toLowerCase().includes(searchText) ||
         (user.userName || "").toLowerCase().includes(searchText) ||
         (user.email || "").toLowerCase().includes(searchText) ||
-        (user.phone || "").includes(search);
+        String(user.phone || "").includes(search);
 
       const matchesRole =
         roleFilter === "All" || user.role === roleFilter;
@@ -106,7 +131,11 @@ export default function Users() {
   const formatDate = (date) => {
     if (!date) return "N/A";
 
-    return new Date(date).toLocaleDateString("en-IN", {
+    const parsedDate = new Date(date);
+
+    if (Number.isNaN(parsedDate.getTime())) return "N/A";
+
+    return parsedDate.toLocaleDateString("en-IN", {
       day: "2-digit",
       month: "short",
       year: "numeric",
@@ -115,7 +144,8 @@ export default function Users() {
 
   const getInitials = (name) => {
     return (name || "User")
-      .split(" ")
+      .trim()
+      .split(/\s+/)
       .map((word) => word[0])
       .join("")
       .slice(0, 2)
@@ -171,7 +201,7 @@ export default function Users() {
                   </p>
 
                   <p className="mt-3 text-3xl font-bold text-gray-900">
-                    {stat.value}
+                    {stat.value.toLocaleString("en-IN")}
                   </p>
 
                   <p className="mt-2 text-xs text-gray-400">
@@ -244,6 +274,7 @@ export default function Users() {
               size={30}
               className="mx-auto animate-spin text-pink-600"
             />
+
             <p className="mt-3 text-sm text-gray-500">
               Loading registered users...
             </p>
@@ -279,80 +310,85 @@ export default function Users() {
                 </thead>
 
                 <tbody className="divide-y divide-gray-100">
-                  {filteredUsers.map((user) => (
-                    <tr
-                      key={user._id}
-                      className="transition hover:bg-gray-50/80"
-                    >
-                      {/* Profile */}
-                      <td className="px-6 py-5">
-                        <div className="flex items-center gap-3">
-                          {user.profileImage ? (
-                            <img
-                              src={
-                                user.profileImage.startsWith("http")
-                                  ? user.profileImage
-                                  : `http://localhost:5000${user.profileImage}`
-                              }
-                              alt={user.fullName}
-                              className="h-11 w-11 rounded-full object-cover ring-2 ring-gray-100"
-                            />
-                          ) : (
-                            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-pink-100 font-bold text-pink-700">
-                              {getInitials(user.fullName)}
+                  {filteredUsers.map((user) => {
+                    const profileImage = getProfileImageUrl(
+                      user.profileImage
+                    );
+
+                    return (
+                      <tr
+                        key={user._id}
+                        className="transition hover:bg-gray-50/80"
+                      >
+                        {/* Profile */}
+                        <td className="px-6 py-5">
+                          <div className="flex items-center gap-3">
+                            {profileImage ? (
+                              <img
+                                src={profileImage}
+                                alt={user.fullName || "User"}
+                                onError={(e) => {
+                                  e.currentTarget.style.display = "none";
+                                }}
+                                className="h-11 w-11 rounded-full object-cover ring-2 ring-gray-100"
+                              />
+                            ) : (
+                              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-pink-100 font-bold text-pink-700">
+                                {getInitials(user.fullName)}
+                              </div>
+                            )}
+
+                            <div>
+                              <p className="font-semibold text-gray-900">
+                                {user.fullName || "Unnamed User"}
+                              </p>
+
+                              <p className="mt-1 text-xs text-gray-400">
+                                @{user.userName || "user"}
+                              </p>
                             </div>
-                          )}
-
-                          <div>
-                            <p className="font-semibold text-gray-900">
-                              {user.fullName || "Unnamed User"}
-                            </p>
-
-                            <p className="mt-1 text-xs text-gray-400">
-                              @{user.userName || "user"}
-                            </p>
                           </div>
-                        </div>
-                      </td>
+                        </td>
 
-                      {/* Contact */}
-                      <td className="px-6 py-5">
-                        <p className="flex items-center gap-2 text-sm text-gray-700">
-                          <Mail size={14} className="text-gray-400" />
-                          {user.email}
-                        </p>
+                        {/* Contact */}
+                        <td className="px-6 py-5">
+                          <p className="flex items-center gap-2 text-sm text-gray-700">
+                            <Mail size={14} className="text-gray-400" />
+                            {user.email || "Not provided"}
+                          </p>
 
-                        <p className="mt-2 flex items-center gap-2 text-xs text-gray-500">
-                          <Phone size={13} className="text-gray-400" />
-                          {user.phone || "Not provided"}
-                        </p>
-                      </td>
+                          <p className="mt-2 flex items-center gap-2 text-xs text-gray-500">
+                            <Phone size={13} className="text-gray-400" />
+                            {user.phone || "Not provided"}
+                          </p>
+                        </td>
 
-                      {/* Role */}
-                      <td className="px-6 py-5">
-                        <span
-                          className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
-                            user.role === "admin"
-                              ? "bg-violet-50 text-violet-700"
-                              : "bg-gray-100 text-gray-700"
-                          }`}
-                        >
-                          {user.role || "user"}
-                        </span>
-                      </td>
+                        {/* Role */}
+                        <td className="px-6 py-5">
+                          <span
+                            className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
+                              user.role === "admin"
+                                ? "bg-violet-50 text-violet-700"
+                                : "bg-gray-100 text-gray-700"
+                            }`}
+                          >
+                            {user.role || "user"}
+                          </span>
+                        </td>
 
-                      {/* Joined Date */}
-                      <td className="px-6 py-5 text-sm text-gray-600">
-                        <div className="flex items-center gap-2">
-                          <CalendarDays
-                            size={15}
-                            className="text-gray-400"
-                          />
-                          {formatDate(user.createdAt)}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                        {/* Joined Date */}
+                        <td className="px-6 py-5 text-sm text-gray-600">
+                          <div className="flex items-center gap-2">
+                            <CalendarDays
+                              size={15}
+                              className="text-gray-400"
+                            />
+                            {formatDate(user.createdAt)}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
