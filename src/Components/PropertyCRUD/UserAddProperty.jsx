@@ -158,116 +158,117 @@ export default function UserAddProperty() {
     setError("");
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  
+const handleSubmit = async (e) => {
+  e.preventDefault();
 
-    if (!localStorage.getItem("token")) {
-      navigate("/signIn", { replace: true });
-      return;
-    }
+  if (!localStorage.getItem("token")) {
+    navigate("/signIn", { replace: true });
+    return;
+  }
 
-    if (!formData.name.trim()) {
-      setError("Please enter property name.");
-      return;
-    }
+  if (!formData.name.trim()) {
+    setError("Please enter property name.");
+    return;
+  }
 
-    if (!formData.propertyType || !formData.listingType) {
-      setError("Please select property category and listing type.");
-      return;
-    }
+  if (!formData.propertyType || !formData.listingType) {
+    setError("Please select property category and listing type.");
+    return;
+  }
 
-    if (!formData.price || Number(formData.price) <= 0) {
-      setError("Please enter a valid property price.");
-      return;
-    }
+  if (!formData.price || Number(formData.price) <= 0) {
+    setError("Please enter a valid property price.");
+    return;
+  }
 
-    if (!formData.description.trim()) {
-      setError("Please enter property description.");
-      return;
-    }
+  if (!formData.description.trim()) {
+    setError("Please enter property description.");
+    return;
+  }
 
-    if (!formData.area || Number(formData.area) <= 0) {
-      setError("Please enter a valid property area.");
-      return;
-    }
+  if (!formData.area || Number(formData.area) <= 0) {
+    setError("Please enter a valid property area.");
+    return;
+  }
 
-    if (images.length === 0) {
-      setError("Please upload at least one property image.");
-      return;
-    }
+  if (images.length === 0) {
+    setError("Please upload at least one property image.");
+    return;
+  }
 
-    const locationParts = formData.location
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
+  const locationParts = formData.location
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 
-    if (locationParts.length < 2) {
-      setError("Please enter location in City, State format.");
-      return;
-    }
+  if (locationParts.length < 2) {
+    setError("Please enter location in City, State format.");
+    return;
+  }
 
-    try {
-      setLoading(true);
-      setError("");
+  try {
+    setLoading(true);
+    setError("");
 
-      const data = new FormData();
+    const data = new FormData();
 
-      data.append("name", formData.name.trim());
-      data.append("description", formData.description.trim());
-      data.append("propertyType", formData.propertyType);
-      data.append("listingType", formData.listingType);
-      data.append("price", String(Number(formData.price)));
-      data.append("bedrooms", String(Number(formData.bedrooms || 0)));
-      data.append("bathrooms", String(Number(formData.bathrooms || 0)));
+    data.append("name", formData.name.trim());
+    data.append("description", formData.description.trim());
+    data.append("propertyType", formData.propertyType);
+    data.append("listingType", formData.listingType);
+    data.append("price", String(Number(formData.price)));
+    data.append("bedrooms", String(Number(formData.bedrooms || 0)));
+    data.append("bathrooms", String(Number(formData.bathrooms || 0)));
 
-      const city = locationParts[0];
-      const state = locationParts.slice(1).join(", ");
+    data.append(
+      "location",
+      JSON.stringify({
+        address: formData.location.trim(),
+        city: locationParts[0],
+        state: locationParts.slice(1).join(", "),
+        country: "India",
+        pincode: "",
+      })
+    );
 
-      data.append(
-        "location",
-        JSON.stringify({
-          address: formData.location.trim(),
-          city,
-          state,
-          country: "India",
-          pincode: "",
-        })
-      );
+    data.append(
+      "area",
+      JSON.stringify({
+        value: Number(formData.area),
+        unit: "sqft",
+      })
+    );
 
-      data.append(
-        "area",
-        JSON.stringify({
-          value: Number(formData.area),
-          unit: "sqft",
-        })
-      );
+    data.append("amenities", JSON.stringify(formData.amenities));
 
-      data.append("amenities", JSON.stringify(formData.amenities));
+    // Cloudinary upload is handled by backend Multer middleware.
+    images.forEach(({ file }) => {
+      data.append("images", file);
+    });
 
-      images.forEach((item) => {
-        data.append("images", item.file);
-      });
+    const response = await submitUserProperty(data);
 
-      await submitUserProperty(data);
+    console.log("Property submitted:", response);
 
-      alert("Property submitted successfully! Waiting for admin approval.");
+    alert("Property submitted successfully! Waiting for admin approval.");
 
-      navigate("/my-properties", {
-        replace: true,
-      });
-    } catch (err) {
-      console.error("User Add Property Error:", err);
-      console.error("Backend Response:", err.response?.data);
+    navigate("/my-properties", { replace: true });
+  } catch (err) {
+    console.error("User Add Property Error:", err);
+    console.error("Backend Response:", err.response?.data);
 
-      setError(
-        err.response?.data?.message ||
-        err.response?.data?.error ||
-        "Unable to submit property. Please try again."
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
+    setError(
+      err.response?.data?.message ||
+      err.response?.data?.error ||
+      err.message ||
+      "Unable to submit property. Please try again."
+    );
+  } finally {
+    setLoading(false);
+  }
+};
+
 
   if (authChecking) {
     return (

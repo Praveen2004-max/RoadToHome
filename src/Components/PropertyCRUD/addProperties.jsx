@@ -106,166 +106,185 @@ export default function AddProperty() {
   };
 
   const handleImageChange = (e) => {
-    const selectedFiles = Array.from(e.target.files || []);
+  const selectedFiles = Array.from(e.target.files || []);
 
-    if (!selectedFiles.length) return;
+  if (!selectedFiles.length) return;
 
-    const remainingSlots = MAX_IMAGES - images.length;
+  if (images.length + selectedFiles.length > MAX_IMAGES) {
+    setError(`You can upload maximum ${MAX_IMAGES} images.`);
+    e.target.value = "";
+    return;
+  }
 
-    if (selectedFiles.length > remainingSlots) {
-      setError(`You can upload maximum ${MAX_IMAGES} images.`);
+  const newImages = [];
+
+  for (const file of selectedFiles) {
+    if (!allowedTypes.includes(file.type)) {
+      newImages.forEach((item) => URL.revokeObjectURL(item.preview));
+      setError("Only JPG, PNG and WEBP images are allowed.");
       e.target.value = "";
       return;
     }
 
-    const validFiles = [];
-
-    for (const file of selectedFiles) {
-      if (!allowedTypes.includes(file.type)) {
-        setError("Only JPG, PNG and WEBP images are allowed.");
-        e.target.value = "";
-        return;
-      }
-
-      if (file.size > MAX_IMAGE_SIZE) {
-        setError(`${file.name} exceeds the 5 MB size limit.`);
-        e.target.value = "";
-        return;
-      }
-
-      validFiles.push({
-        file,
-        preview: URL.createObjectURL(file),
-      });
+    if (file.size > MAX_IMAGE_SIZE) {
+      newImages.forEach((item) => URL.revokeObjectURL(item.preview));
+      setError(`${file.name} exceeds the 5 MB size limit.`);
+      e.target.value = "";
+      return;
     }
 
-    setImages((prev) => [...prev, ...validFiles]);
+    newImages.push({
+      file,
+      preview: URL.createObjectURL(file),
+    });
+  }
+
+  setImages((prev) => [...prev, ...newImages]);
+  setError("");
+  e.target.value = "";
+};
+
+const removeImage = (index) => {
+  setImages((prev) => {
+    const selectedImage = prev[index];
+
+    if (selectedImage) {
+      URL.revokeObjectURL(selectedImage.preview);
+    }
+
+    return prev.filter((_, i) => i !== index);
+  });
+
+  setError("");
+};
+
+const handleSubmit = async (e) => {
+  e.preventDefault();
+
+  if (loading) return;
+
+  if (!localStorage.getItem("token")) {
+    navigate("/signIn", { replace: true });
+    return;
+  }
+
+  if (!formData.name.trim()) {
+    setError("Please enter property name.");
+    return;
+  }
+
+  if (!formData.propertyType || !formData.listingType) {
+    setError("Please select property category and listing type.");
+    return;
+  }
+
+  if (!formData.price || Number(formData.price) <= 0) {
+    setError("Please enter a valid property price.");
+    return;
+  }
+
+  if (!formData.description.trim()) {
+    setError("Please enter property description.");
+    return;
+  }
+
+  if (!formData.area || Number(formData.area) <= 0) {
+    setError("Please enter a valid property area.");
+    return;
+  }
+
+  if (images.length === 0) {
+    setError("Please upload at least one property image.");
+    return;
+  }
+
+  const locationParts = formData.location
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (locationParts.length < 2) {
+    setError("Please enter location in City, State format.");
+    return;
+  }
+
+  try {
+    setLoading(true);
     setError("");
-    e.target.value = "";
-  };
 
-  const removeImage = (index) => {
-    setImages((prev) => {
-      const selectedImage = prev[index];
+    const data = new FormData();
 
-      if (selectedImage) {
-        URL.revokeObjectURL(selectedImage.preview);
-      }
+    data.append("name", formData.name.trim());
+    data.append("description", formData.description.trim());
+    data.append("propertyType", formData.propertyType);
+    data.append("listingType", formData.listingType);
+    data.append("price", String(Number(formData.price)));
+    data.append("bedrooms", String(Number(formData.bedrooms || 0)));
+    data.append("bathrooms", String(Number(formData.bathrooms || 0)));
 
-      return prev.filter((_, i) => i !== index);
+    data.append(
+      "location",
+      JSON.stringify({
+        address: formData.location.trim(),
+        city: locationParts[0],
+        state: locationParts.slice(1).join(", "),
+        country: "India",
+        pincode: "",
+      })
+    );
+
+    data.append(
+      "area",
+      JSON.stringify({
+        value: Number(formData.area),
+        unit: "sqft",
+      })
+    );
+
+    data.append("amenities", JSON.stringify(formData.amenities));
+
+    // Send original files to backend.
+    // Backend Multer will upload them to Cloudinary.
+    images.forEach(({ file }) => {
+      data.append("images", file);
     });
 
-    setError("");
-  };
+    const response = await addProperty(data);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+    console.log("Property added successfully:", response);
 
-    if (!localStorage.getItem("token")) {
-      navigate("/signIn", { replace: true });
-      return;
-    }
+    alert("Property added successfully!");
 
-    if (!formData.name.trim()) {
-      setError("Please enter property name.");
-      return;
-    }
+    navigate("/dashboard/properties", {
+      replace: true,
+    });
 
-    if (!formData.propertyType || !formData.listingType) {
-      setError("Please select property category and listing type.");
-      return;
-    }
+  } catch (err) {
+    console.error("Admin Add Property Error:", err);
+    console.error("Backend Response:", err.response?.data);
 
-    if (!formData.price || Number(formData.price) <= 0) {
-      setError("Please enter a valid property price.");
-      return;
-    }
+    setError(
+      err.response?.data?.message ||
+      err.response?.data?.error ||
+      err.message ||
+      "Unable to add property. Please try again."
+    );
+  } finally {
+    setLoading(false);
+  }
+};
 
-    if (!formData.description.trim()) {
-      setError("Please enter property description.");
-      return;
-    }
+  useEffect(() => {
+    imagesRef.current = images;
+  }, [images]);
 
-    if (!formData.area || Number(formData.area) <= 0) {
-      setError("Please enter a valid property area.");
-      return;
-    }
-
-    if (images.length === 0) {
-      setError("Please upload at least one property image.");
-      return;
-    }
-
-    const locationParts = formData.location
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
-
-    if (locationParts.length < 2) {
-      setError("Please enter location in City, State format.");
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError("");
-
-      const data = new FormData();
-
-      data.append("name", formData.name.trim());
-      data.append("description", formData.description.trim());
-      data.append("propertyType", formData.propertyType);
-      data.append("listingType", formData.listingType);
-      data.append("price", String(Number(formData.price)));
-      data.append("bedrooms", String(Number(formData.bedrooms || 0)));
-      data.append("bathrooms", String(Number(formData.bathrooms || 0)));
-
-      const city = locationParts[0];
-      const state = locationParts.slice(1).join(", ");
-
-      data.append(
-        "location",
-        JSON.stringify({
-          address: formData.location.trim(),
-          city,
-          state,
-          country: "India",
-          pincode: "",
-        })
-      );
-
-      data.append(
-        "area",
-        JSON.stringify({
-          value: Number(formData.area),
-          unit: "sqft",
-        })
-      );
-
-      data.append("amenities", JSON.stringify(formData.amenities));
-
-      images.forEach((item) => {
-        data.append("images", item.file);
+  useEffect(() => {
+    return () => {
+      imagesRef.current.forEach((item) => {
+        URL.revokeObjectURL(item.preview);
       });
-
-      await addProperty(data);
-
-      navigate("/dashboard/properties", {
-        replace: true,
-      });
-    } catch (err) {
-      console.error("Admin Add Property Error:", err);
-      console.error("Backend Response:", err.response?.data);
-
-      setError(
-        err.response?.data?.message ||
-        err.response?.data?.error ||
-        "Unable to add property. Please try again."
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
+    };
+  }, []);
 
   if (authChecking) {
     return (
