@@ -4,7 +4,7 @@ const express = require("express");
 const cors = require("cors");
 const path = require("path");
 
-// Load environment variables from Backend/.env
+// Load environment variables
 require("dotenv").config({
   path: path.join(__dirname, ".env"),
 });
@@ -12,17 +12,18 @@ require("dotenv").config({
 const app = express();
 
 // ===============================
-// Middleware
+// CORS
 // ===============================
 
-const allowedOrigins = process.env.CLIENT_URL
-  ? process.env.CLIENT_URL.split(",").map((url) => url.trim())
-  : ["http://localhost:5173"];
+const allowedOrigins = (
+  process.env.CLIENT_URL || "http://localhost:5173"
+)
+  .split(",")
+  .map((url) => url.trim().replace(/\/$/, ""));
 
 app.use(
   cors({
-    origin: function (origin, callback) {
-      // Allow requests without origin (Postman, server-to-server)
+    origin: (origin, callback) => {
       if (!origin || allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
@@ -34,6 +35,10 @@ app.use(
     credentials: true,
   })
 );
+
+// ===============================
+// Middleware
+// ===============================
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -115,7 +120,6 @@ const startServer = async () => {
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`RoadToHome Server running on port ${PORT}`);
     });
-
   } catch (error) {
     console.error("MongoDB Connection Error:", error.message);
     console.error("Error Name:", error.name);

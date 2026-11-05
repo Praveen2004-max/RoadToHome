@@ -1,3 +1,4 @@
+
 import React, { useMemo, useState } from "react";
 import {
   MapPin,
@@ -7,21 +8,29 @@ import {
   Maximize,
 } from "lucide-react";
 
-const BACKEND_URL = "http://localhost:5000";
+const BACKEND_URL = (
+  import.meta.env.VITE_API_URL ||
+  "https://roadtohome-api.onrender.com/api"
+).replace(/\/api\/?$/, "");
 
 const getImageUrl = (image) => {
   if (!image) return "/Homes/home1.jpg";
 
   const imagePath =
-    typeof image === "string" ? image : image.url || image.path;
+    typeof image === "string"
+      ? image
+      : image.url || image.path;
 
   if (!imagePath) return "/Homes/home1.jpg";
 
-  if (imagePath.startsWith("http")) return imagePath;
+  if (imagePath.startsWith("http")) {
+    return imagePath.replace(
+      /^https?:\/\/(localhost|127\.0\.0\.1):5000/i,
+      BACKEND_URL
+    );
+  }
 
-  return `${BACKEND_URL}${
-    imagePath.startsWith("/") ? "" : "/"
-  }${imagePath}`;
+  return `${BACKEND_URL}/${imagePath.replace(/^\/+/, "")}`;
 };
 
 const PropertyListing = ({
@@ -86,6 +95,7 @@ const PropertyListing = ({
         <h3 className="text-xl font-semibold text-gray-700">
           No properties available
         </h3>
+
         <p className="mt-2 text-gray-500">
           Properties will appear here when they are approved.
         </p>
@@ -100,6 +110,7 @@ const PropertyListing = ({
           <h2 className="text-xl font-bold text-gray-900">
             Available Properties
           </h2>
+
           <p className="mt-1 text-sm text-gray-500">
             {filteredProperties.length} properties found
           </p>
@@ -111,6 +122,7 @@ const PropertyListing = ({
           <h3 className="text-lg font-semibold text-gray-700">
             No matching properties found
           </h3>
+
           <p className="mt-2 text-sm text-gray-500">
             Try changing your search or filters.
           </p>
@@ -118,8 +130,9 @@ const PropertyListing = ({
       ) : (
         <div className="grid grid-cols-1 gap-5 md:grid-cols-2 2xl:grid-cols-3">
           {filteredProperties.map((property) => {
-            const image = property.images?.[0];
+            const image = property.images?.[0] || property.image;
             const imageUrl = getImageUrl(image);
+
             const isSelected =
               selectedHouse?._id === property._id;
 
@@ -143,8 +156,9 @@ const PropertyListing = ({
                 <div className="relative h-56 overflow-hidden">
                   <img
                     src={imageUrl}
-                    alt={property.name}
+                    alt={property.name || "Property"}
                     onError={(e) => {
+                      e.currentTarget.onerror = null;
                       e.currentTarget.src = "/Homes/home1.jpg";
                     }}
                     className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
