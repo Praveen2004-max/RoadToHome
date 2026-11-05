@@ -1,5 +1,10 @@
+import React, {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Link,
   NavLink,
@@ -25,23 +30,35 @@ import {
   LoaderCircle,
   BellRing,
   UserCircle,
+  House,
 } from "lucide-react";
 
 import API from "../services/api";
 
-const IMAGE_BASE_URL = "http://localhost:5000";
+// Production and local backend URL
+const BACKEND_URL = (
+  import.meta.env.VITE_API_URL ||
+  "https://roadtohome-api.onrender.com/api"
+).replace(/\/api\/?$/, "");
 
 // Profile image URL helper
 const getProfileImageUrl = (image) => {
   if (!image) return "";
 
-  if (image.startsWith("http://") || image.startsWith("https://")) {
-    return image;
+  if (typeof image === "object") {
+    image = image.url || image.path || "";
   }
 
-  const cleanPath = image.replace(/^\/+/, "");
+  if (!image) return "";
 
-  return `${IMAGE_BASE_URL}/${cleanPath}`;
+  if (/^https?:\/\//i.test(image)) {
+    return image.replace(
+      /^https?:\/\/(localhost|127\.0\.0\.1):5000/i,
+      BACKEND_URL
+    );
+  }
+
+  return `${BACKEND_URL}/${image.replace(/^\/+/, "")}`;
 };
 
 const Navbar = () => {
@@ -67,10 +84,10 @@ const Navbar = () => {
   const [notificationLoading, setNotificationLoading] = useState(false);
   const [notificationError, setNotificationError] = useState("");
 
-  // Profile image fallback state
+  // Image fallback
   const [imageFailed, setImageFailed] = useState(false);
 
-  // Separate refs
+  // Refs
   const notificationDesktopRef = useRef(null);
   const notificationMobileRef = useRef(null);
   const profileRef = useRef(null);
@@ -79,6 +96,9 @@ const Navbar = () => {
   const [showNavbar, setShowNavbar] = useState(true);
   const lastScrollY = useRef(0);
 
+  const isAdmin = user?.role === "admin";
+
+  // Scroll listener
   useEffect(() => {
     const handleScroll = () => {
       const currentScrollY = window.scrollY;
@@ -94,21 +114,21 @@ const Navbar = () => {
       lastScrollY.current = currentScrollY;
     };
 
-    window.addEventListener("scroll", handleScroll, { passive: true });
+    window.addEventListener("scroll", handleScroll, {
+      passive: true,
+    });
 
     return () => {
       window.removeEventListener("scroll", handleScroll);
     };
   }, []);
 
-  // Get token
+  // Token
   const getToken = () => localStorage.getItem("token");
 
   // Fetch notifications
   const fetchNotifications = useCallback(async () => {
-    const token = getToken();
-
-    if (!token) {
+    if (!getToken()) {
       setNotifications([]);
       setUnreadCount(0);
       return;
@@ -120,12 +140,13 @@ const Navbar = () => {
 
       const response = await API.get("/notifications");
 
-      const notificationList = response.data.notifications || [];
+      const notificationList =
+        response.data?.notifications || [];
 
       setNotifications(notificationList);
 
       setUnreadCount(
-        response.data.unreadCount ??
+        response.data?.unreadCount ??
           notificationList.filter((item) => !item.isRead).length
       );
     } catch (error) {
@@ -143,8 +164,14 @@ const Navbar = () => {
     }
   }, []);
 
-  // Load and refresh notifications
+  // Notification polling
   useEffect(() => {
+    if (!user) {
+      setNotifications([]);
+      setUnreadCount(0);
+      return;
+    }
+
     fetchNotifications();
 
     const interval = setInterval(fetchNotifications, 30000);
@@ -152,17 +179,18 @@ const Navbar = () => {
     return () => clearInterval(interval);
   }, [fetchNotifications, user]);
 
-  // Update user after login/logout
+  // Update user after login/logout/profile update
   useEffect(() => {
     const updateUser = () => {
       try {
-        setUser(JSON.parse(localStorage.getItem("user") || "null"));
-        setImageFailed(false);
+        setUser(
+          JSON.parse(localStorage.getItem("user") || "null")
+        );
       } catch {
         setUser(null);
-        setImageFailed(false);
       }
 
+      setImageFailed(false);
       fetchNotifications();
     };
 
@@ -175,7 +203,7 @@ const Navbar = () => {
     };
   }, [fetchNotifications]);
 
-  // Close dropdowns on outside click
+  // Close dropdown outside click
   useEffect(() => {
     const handleOutsideClick = (event) => {
       const clickedInsideDesktop =
@@ -196,7 +224,10 @@ const Navbar = () => {
     document.addEventListener("mousedown", handleOutsideClick);
 
     return () => {
-      document.removeEventListener("mousedown", handleOutsideClick);
+      document.removeEventListener(
+        "mousedown",
+        handleOutsideClick
+      );
     };
   }, []);
 
@@ -207,11 +238,15 @@ const Navbar = () => {
 
       setNotifications((previous) =>
         previous.map((item) =>
-          item._id === id ? { ...item, isRead: true } : item
+          item._id === id
+            ? { ...item, isRead: true }
+            : item
         )
       );
 
-      setUnreadCount((previous) => Math.max(0, previous - 1));
+      setUnreadCount((previous) =>
+        Math.max(0, previous - 1)
+      );
     } catch (error) {
       console.error(
         "Mark Notification Read Error:",
@@ -226,7 +261,10 @@ const Navbar = () => {
       await API.patch("/notifications/read-all");
 
       setNotifications((previous) =>
-        previous.map((item) => ({ ...item, isRead: true }))
+        previous.map((item) => ({
+          ...item,
+          isRead: true,
+        }))
       );
 
       setUnreadCount(0);
@@ -252,7 +290,9 @@ const Navbar = () => {
       );
 
       if (deletedNotification && !deletedNotification.isRead) {
-        setUnreadCount((previous) => Math.max(0, previous - 1));
+        setUnreadCount((previous) =>
+          Math.max(0, previous - 1)
+        );
       }
     } catch (error) {
       console.error(
@@ -294,13 +334,15 @@ const Navbar = () => {
     navigate("/signIn");
   };
 
-  // Date formatting
+  // Format notification time
   const formatTime = (date) => {
     if (!date) return "";
 
     const notificationDate = new Date(date);
 
-    if (Number.isNaN(notificationDate.getTime())) return "";
+    if (Number.isNaN(notificationDate.getTime())) {
+      return "";
+    }
 
     return notificationDate.toLocaleString("en-IN", {
       day: "numeric",
@@ -310,8 +352,11 @@ const Navbar = () => {
     });
   };
 
-  // Profile image component
-  const ProfileImage = ({ size = "h-9 w-9", iconSize = 20 }) => {
+  // Profile image
+  const ProfileImage = ({
+    size = "h-9 w-9",
+    iconSize = 20,
+  }) => {
     const imageUrl = getProfileImageUrl(user?.profileImage);
 
     if (!imageUrl || imageFailed) {
@@ -337,9 +382,13 @@ const Navbar = () => {
   // Notification dropdown
   const NotificationPanel = () => (
     <div className="absolute right-0 top-full z-[9999] mt-3 w-[min(360px,calc(100vw-24px))] overflow-hidden rounded-2xl border border-gray-200 bg-white text-gray-800 shadow-2xl">
+
       <div className="flex items-center justify-between border-b border-gray-100 px-4 py-4">
         <div>
-          <h3 className="font-bold text-gray-900">Notifications</h3>
+          <h3 className="font-bold text-gray-900">
+            Notifications
+          </h3>
+
           <p className="mt-1 text-xs text-gray-500">
             {unreadCount} unread notifications
           </p>
@@ -364,7 +413,10 @@ const Navbar = () => {
           </div>
         ) : notificationError && notifications.length === 0 ? (
           <div className="px-5 py-8 text-center">
-            <p className="text-sm text-red-500">{notificationError}</p>
+            <p className="text-sm text-red-500">
+              {notificationError}
+            </p>
+
             <button
               type="button"
               onClick={fetchNotifications}
@@ -376,10 +428,14 @@ const Navbar = () => {
         ) : notifications.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-10 text-gray-400">
             <BellRing size={35} strokeWidth={1.5} />
+
             <p className="mt-3 font-semibold text-gray-600">
               No notifications
             </p>
-            <p className="mt-1 text-xs">You are all caught up!</p>
+
+            <p className="mt-1 text-xs">
+              You are all caught up!
+            </p>
           </div>
         ) : (
           notifications.map((notification) => (
@@ -391,7 +447,9 @@ const Navbar = () => {
             >
               <button
                 type="button"
-                onClick={() => handleNotificationClick(notification)}
+                onClick={() =>
+                  handleNotificationClick(notification)
+                }
                 className="flex min-w-0 flex-1 items-start gap-3 text-left"
               >
                 <div className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-orange-100 text-orange-600">
@@ -422,7 +480,9 @@ const Navbar = () => {
               <button
                 type="button"
                 title="Delete notification"
-                onClick={() => deleteNotification(notification._id)}
+                onClick={() =>
+                  deleteNotification(notification._id)
+                }
                 className="rounded-lg p-2 text-gray-400 transition hover:bg-red-50 hover:text-red-500"
               >
                 <Trash2 size={15} />
@@ -446,7 +506,10 @@ const Navbar = () => {
 
   // Notification bell
   const renderNotificationBell = (bellRef) => (
-    <div className="relative z-[100] shrink-0" ref={bellRef}>
+    <div
+      className="relative z-[100] shrink-0"
+      ref={bellRef}
+    >
       <button
         type="button"
         onClick={() => {
@@ -481,7 +544,7 @@ const Navbar = () => {
         : "text-gray-700 hover:text-orange-600"
     }`;
 
-  // Profile menu
+  // Profile dropdown
   const ProfileMenu = () => (
     <div className="relative" ref={profileRef}>
       <button
@@ -500,7 +563,9 @@ const Navbar = () => {
 
         <ChevronDown
           size={15}
-          className={`transition ${profileMenuOpen ? "rotate-180" : ""}`}
+          className={`transition ${
+            profileMenuOpen ? "rotate-180" : ""
+          }`}
         />
       </button>
 
@@ -510,7 +575,10 @@ const Navbar = () => {
             <p className="truncate text-sm font-bold text-gray-800">
               {user?.fullName || user?.userName}
             </p>
-            <p className="truncate text-xs text-gray-500">{user?.email}</p>
+
+            <p className="truncate text-xs text-gray-500">
+              {user?.email}
+            </p>
           </div>
 
           <Link
@@ -523,22 +591,35 @@ const Navbar = () => {
           </Link>
 
           <Link
-            to="/dashboard"
+            to="/my-properties"
             onClick={() => setProfileMenuOpen(false)}
             className="flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-orange-50 hover:text-orange-600"
           >
-            <LayoutDashboard size={17} />
-            Dashboard
+            <House size={17} />
+            My Properties
           </Link>
 
-          <Link
-            to="/dashboard/Settings"
-            onClick={() => setProfileMenuOpen(false)}
-            className="flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-orange-50 hover:text-orange-600"
-          >
-            <Settings size={17} />
-            Settings
-          </Link>
+          {isAdmin && (
+            <>
+              <Link
+                to="/dashboard"
+                onClick={() => setProfileMenuOpen(false)}
+                className="flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-orange-50 hover:text-orange-600"
+              >
+                <LayoutDashboard size={17} />
+                Admin Dashboard
+              </Link>
+
+              <Link
+                to="/dashboard/Settings"
+                onClick={() => setProfileMenuOpen(false)}
+                className="flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-orange-50 hover:text-orange-600"
+              >
+                <Settings size={17} />
+                Settings
+              </Link>
+            </>
+          )}
 
           <button
             type="button"
@@ -562,7 +643,7 @@ const Navbar = () => {
       >
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
 
-          {/* Original Logo */}
+          {/* Logo */}
           <Link to="/" className="shrink-0">
             <img
               className="h-9 w-auto sm:h-10 md:h-12"
@@ -593,10 +674,15 @@ const Navbar = () => {
               Contact
             </NavLink>
 
-            <NavLink to="/dashboard" className={navLinkClass}>
-              <LayoutDashboard size={17} />
-              Dashboard
-            </NavLink>
+            {isAdmin && (
+              <NavLink
+                to="/dashboard"
+                className={navLinkClass}
+              >
+                <LayoutDashboard size={17} />
+                Dashboard
+              </NavLink>
+            )}
           </div>
 
           {/* Desktop right section */}
@@ -626,7 +712,8 @@ const Navbar = () => {
 
           {/* Mobile right section */}
           <div className="flex items-center gap-2 md:hidden">
-            {user && renderNotificationBell(notificationMobileRef)}
+            {user &&
+              renderNotificationBell(notificationMobileRef)}
 
             <button
               type="button"
@@ -682,14 +769,16 @@ const Navbar = () => {
                 Contact
               </NavLink>
 
-              <NavLink
-                to="/dashboard"
-                onClick={() => setIsOpen(false)}
-                className={navLinkClass}
-              >
-                <LayoutDashboard size={18} />
-                Dashboard
-              </NavLink>
+              {isAdmin && (
+                <NavLink
+                  to="/dashboard"
+                  onClick={() => setIsOpen(false)}
+                  className={navLinkClass}
+                >
+                  <LayoutDashboard size={18} />
+                  Admin Dashboard
+                </NavLink>
+              )}
 
               <Link
                 to="/user-addProperty"
@@ -703,12 +792,16 @@ const Navbar = () => {
               {user ? (
                 <>
                   <div className="flex items-center gap-3 border-t border-gray-100 pt-5">
-                    <ProfileImage size="h-11 w-11" iconSize={22} />
+                    <ProfileImage
+                      size="h-11 w-11"
+                      iconSize={22}
+                    />
 
                     <div className="min-w-0">
                       <p className="truncate font-bold text-gray-800">
                         {user.fullName || user.userName}
                       </p>
+
                       <p className="truncate text-xs text-gray-500">
                         {user.email}
                       </p>
@@ -725,13 +818,24 @@ const Navbar = () => {
                   </Link>
 
                   <Link
-                    to="/dashboard/Settings"
+                    to="/my-properties"
                     onClick={() => setIsOpen(false)}
                     className="flex items-center gap-3 text-sm font-semibold text-gray-700 hover:text-orange-600"
                   >
-                    <Settings size={18} />
-                    Settings
+                    <House size={18} />
+                    My Properties
                   </Link>
+
+                  {isAdmin && (
+                    <Link
+                      to="/dashboard/Settings"
+                      onClick={() => setIsOpen(false)}
+                      className="flex items-center gap-3 text-sm font-semibold text-gray-700 hover:text-orange-600"
+                    >
+                      <Settings size={18} />
+                      Settings
+                    </Link>
+                  )}
 
                   <button
                     type="button"

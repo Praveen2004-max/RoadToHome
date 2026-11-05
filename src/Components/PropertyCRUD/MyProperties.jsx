@@ -1,5 +1,4 @@
-
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate, Link } from "react-router-dom";
 
 import {
@@ -15,11 +14,37 @@ import {
   XCircle,
   Eye,
   LogOut,
+  Trash2,
 } from "lucide-react";
 
+import API from "../../services/api";
 import { getMyProperties } from "../../services/propertyService";
 
-const API_URL = "http://localhost:5000";
+// Backend URL automatically selects production or local backend
+const BACKEND_URL = (
+  import.meta.env.VITE_API_URL ||
+  "https://roadtohome-api.onrender.com/api"
+).replace(/\/api\/?$/, "");
+
+// Image URL helper
+const getImageUrl = (image) => {
+  if (!image) return "";
+
+  if (typeof image === "object") {
+    image = image.url || image.path || "";
+  }
+
+  if (!image) return "";
+
+  if (/^https?:\/\//i.test(image)) {
+    return image.replace(
+      /^https?:\/\/(localhost|127\.0\.0\.1):5000/i,
+      BACKEND_URL
+    );
+  }
+
+  return `${BACKEND_URL}/${image.replace(/^\/+/, "")}`;
+};
 
 export default function MyProperties() {
   const navigate = useNavigate();
@@ -29,68 +54,94 @@ export default function MyProperties() {
   const [error, setError] = useState("");
   const [activeFilter, setActiveFilter] = useState("All");
   const [refresh, setRefresh] = useState(0);
+  const [deletingId, setDeletingId] = useState(null);
 
   // Fetch logged-in user's properties
-  useEffect(() => {
-    let isMounted = true;
+  const fetchProperties = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError("");
 
-    const fetchProperties = async () => {
-      try {
-        setLoading(true);
-        setError("");
+      const token = localStorage.getItem("token");
 
-        const token = localStorage.getItem("token");
-
-        if (!token) {
-          navigate("/signIn", {
-            replace: true,
-            state: { from: "/my-properties" },
-          });
-          return;
-        }
-
-        const response = await getMyProperties();
-
-        // Supports both array and object API responses
-        const propertyList = Array.isArray(response)
-          ? response
-          : response?.properties ||
-            response?.data ||
-            [];
-
-        if (isMounted) {
-          setProperties(propertyList);
-        }
-      } catch (err) {
-        console.error("My Properties Error:", err);
-
-        if (err.response?.status === 401) {
-          navigate("/signIn", {
-            replace: true,
-            state: { from: "/my-properties" },
-          });
-          return;
-        }
-
-        if (isMounted) {
-          setError(
-            err.response?.data?.message ||
-              "Unable to load your properties. Please try again."
-          );
-        }
-      } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
+      if (!token) {
+        navigate("/signIn", {
+          replace: true,
+          state: { from: "/my-properties" },
+        });
+        return;
       }
-    };
 
+      const response = await getMyProperties();
+
+      const propertyList = Array.isArray(response)
+        ? response
+        : response?.properties ||
+          response?.data?.properties ||
+          response?.data ||
+          [];
+
+      setProperties(
+        Array.isArray(propertyList) ? propertyList : []
+      );
+    } catch (err) {
+      console.error(
+        "My Properties Error:",
+        err.response?.data || err
+      );
+
+      if (err.response?.status === 401) {
+        navigate("/signIn", {
+          replace: true,
+          state: { from: "/my-properties" },
+        });
+        return;
+      }
+
+      setError(
+        err.response?.data?.message ||
+          "Unable to load your properties. Please try again."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [navigate]);
+
+  useEffect(() => {
     fetchProperties();
+  }, [fetchProperties, refresh]);
 
-    return () => {
-      isMounted = false;
-    };
-  }, [navigate, refresh]);
+  // Delete Property
+  const handleDelete = async (id) => {
+    const confirmDelete = window.confirm(
+      "Are you sure you want to delete this property?"
+    );
+
+    if (!confirmDelete) return;
+
+    try {
+      setDeletingId(id);
+
+      // Backend DELETE /api/properties/:id
+      await API.delete(`/properties/${id}`);
+
+      setProperties((previous) =>
+        previous.filter((item) => item._id !== id)
+      );
+    } catch (err) {
+      console.error(
+        "Delete Property Error:",
+        err.response?.data || err
+      );
+
+      alert(
+        err.response?.data?.message ||
+          "Property delete nahi ho payi."
+      );
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   // Status counts
   const pendingCount = properties.filter(
@@ -113,23 +164,7 @@ export default function MyProperties() {
           (item) => item.approvalStatus === activeFilter
         );
 
-  // Image URL
-  const getImageUrl = (image) => {
-    if (!image) return "";
-
-    if (image.startsWith("http")) return image;
-
-    if (image.startsWith("/")) {
-      return `${API_URL}${image}`;
-    }
-
-    if (image.startsWith("uploads/")) {
-      return `${API_URL}/${image}`;
-    }
-
-    return `${API_URL}/uploads/${image}`;
-  };
-
+  // Status styles
   const getStatusStyle = (status) => {
     switch (status) {
       case "Approved":
@@ -158,15 +193,17 @@ export default function MyProperties() {
 
   return (
     <div className="min-h-screen bg-gray-50 px-4 py-8 sm:px-6 lg:px-10">
-
-      {/* Header */}
       <div className="mx-auto max-w-7xl">
 
+        {/* Header */}
         <div className="mb-8 flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
-
           <div>
-            <Link to="/profile" className="flex gap-1 items-center text-gray-600 hover:text-emerald-700 mb-1"><LogOut size={18} strokeWidth={2.25} />
-                <span>return My Profile</span>
+            <Link
+              to="/profile"
+              className="mb-2 flex items-center gap-2 text-gray-600 hover:text-emerald-700"
+            >
+              <LogOut size={17} className="rotate-180" />
+              Return to My Profile
             </Link>
 
             <p className="mb-2 text-sm font-semibold uppercase tracking-wider text-emerald-600">
@@ -183,7 +220,6 @@ export default function MyProperties() {
           </div>
 
           <div className="flex flex-wrap gap-3">
-
             <button
               onClick={() => setRefresh((prev) => prev + 1)}
               disabled={loading}
@@ -203,13 +239,11 @@ export default function MyProperties() {
               <Plus size={18} />
               Add Property
             </Link>
-
           </div>
         </div>
 
         {/* Statistics */}
         <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-
           <StatCard
             title="Total Properties"
             value={properties.length}
@@ -237,12 +271,10 @@ export default function MyProperties() {
             icon={<XCircle size={22} />}
             color="bg-red-50 text-red-600"
           />
-
         </div>
 
         {/* Filters */}
         <div className="mb-6 flex flex-wrap gap-2">
-
           {["All", "Pending", "Approved", "Rejected"].map(
             (filter) => (
               <button
@@ -254,26 +286,23 @@ export default function MyProperties() {
                     : "border border-gray-200 bg-white text-gray-600 hover:bg-gray-100"
                 }`}
               >
-                {filter}
-                {" "}
+                {filter} (
                 {filter === "All"
-                  ? `(${properties.length})`
-                  : `(${
-                      properties.filter(
-                        (item) =>
-                          item.approvalStatus === filter
-                      ).length
-                    })`}
+                  ? properties.length
+                  : properties.filter(
+                      (item) => item.approvalStatus === filter
+                    ).length}
+                )
               </button>
             )
           )}
-
         </div>
 
         {/* Error */}
         {error && (
           <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
             {error}
+
             <button
               onClick={() => setRefresh((prev) => prev + 1)}
               className="ml-2 font-bold underline"
@@ -291,6 +320,7 @@ export default function MyProperties() {
                 size={32}
                 className="mx-auto animate-spin text-emerald-600"
               />
+
               <p className="mt-3 text-sm text-gray-500">
                 Loading your properties...
               </p>
@@ -300,7 +330,6 @@ export default function MyProperties() {
 
           /* Empty State */
           <div className="rounded-2xl border border-dashed border-gray-300 bg-white px-6 py-16 text-center">
-
             <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
               <Home size={30} />
             </div>
@@ -319,45 +348,57 @@ export default function MyProperties() {
 
             {activeFilter === "All" && (
               <Link
-                to="/add-property"
+                to="/user-addProperty"
                 className="mt-6 inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white hover:bg-emerald-700"
               >
                 <Plus size={18} />
                 Add Your Property
               </Link>
             )}
-
           </div>
 
         ) : (
 
           /* Property Cards */
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-
             {filteredProperties.map((property) => {
+              const firstImage = Array.isArray(property.images)
+                ? property.images[0]
+                : property.image;
 
-              const imageUrl = getImageUrl(
-                property.images?.[0]
-              );
+              const imageUrl = getImageUrl(firstImage);
 
               const location =
                 typeof property.location === "object"
-                  ? `${property.location?.city || ""}, ${property.location?.state || ""}`
+                  ? [
+                      property.location?.city,
+                      property.location?.state,
+                    ]
+                      .filter(Boolean)
+                      .join(", ") || "Location unavailable"
                   : property.location || "Location unavailable";
+
+              const areaValue =
+                typeof property.area === "object"
+                  ? property.area?.value
+                  : property.area;
 
               return (
                 <div
                   key={property._id}
                   className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
                 >
-
                   {/* Image */}
                   <div className="relative h-56 bg-gray-100">
-
                     {imageUrl ? (
                       <img
                         src={imageUrl}
-                        alt={property.name}
+                        alt={property.name || "Property"}
+                        loading="lazy"
+                        onError={(e) => {
+                          e.currentTarget.onerror = null;
+                          e.currentTarget.style.display = "none";
+                        }}
                         className="h-full w-full object-cover"
                       />
                     ) : (
@@ -374,14 +415,11 @@ export default function MyProperties() {
                       {getStatusIcon(property.approvalStatus)}
                       {property.approvalStatus || "Pending"}
                     </span>
-
                   </div>
 
                   {/* Details */}
                   <div className="p-5">
-
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-
                       <div>
                         <h2 className="text-lg font-bold text-gray-900">
                           {property.name}
@@ -397,12 +435,10 @@ export default function MyProperties() {
                         <IndianRupee size={17} />
                         {Number(property.price || 0).toLocaleString("en-IN")}
                       </p>
-
                     </div>
 
                     {/* Property Info */}
                     <div className="mt-5 flex flex-wrap gap-5 border-y border-gray-100 py-4 text-sm text-gray-600">
-
                       <span className="flex items-center gap-2">
                         <BedDouble size={17} />
                         {property.bedrooms || 0} Beds
@@ -415,9 +451,8 @@ export default function MyProperties() {
 
                       <span className="flex items-center gap-2">
                         <Home size={17} />
-                        {property.area?.value || property.area || 0} Sq.ft.
+                        {areaValue || 0} Sq.ft.
                       </span>
-
                     </div>
 
                     {/* Rejection Reason */}
@@ -427,6 +462,7 @@ export default function MyProperties() {
                           <p className="text-xs font-bold text-red-700">
                             Rejection Reason
                           </p>
+
                           <p className="mt-1 text-sm text-red-600">
                             {property.rejectionReason}
                           </p>
@@ -442,19 +478,14 @@ export default function MyProperties() {
 
                     {/* Footer */}
                     <div className="mt-5 flex items-center justify-between gap-3">
-
-                      <span className="text-xs text-gray-400">  
+                      <span className="text-xs text-gray-400">
                         Listed:{" "}
                         {property.createdAt
-                          ? new Date(
-                              property.createdAt
-                            ).toLocaleDateString("en-IN")
+                          ? new Date(property.createdAt).toLocaleDateString(
+                              "en-IN"
+                            )
                           : "N/A"}
                       </span>
-
-                      {/* <p className="text-xs text-red-500">
-                            ID: {property._id || "Missing ID"}
-                    </p>     */}
 
                       <Link
                         to={`/my-properties/${property._id}`}
@@ -463,33 +494,41 @@ export default function MyProperties() {
                         <Eye size={16} />
                         View
                       </Link>
-
                     </div>
 
-                    <div className="flex gap-3 mt-4">
+                    {/* Actions */}
+                    <div className="mt-4 flex gap-3">
                       <button
-                        onClick={() => navigate(`/edit-property/${property._id}`)}
-                        className="flex-1 bg-orange-500 text-white py-2 rounded-lg"
+                        onClick={() =>
+                          navigate(`/edit-property/${property._id}`)
+                        }
+                        className="flex-1 rounded-lg bg-orange-500 py-2 text-white hover:bg-orange-600"
                       >
                         Edit Property
                       </button>
 
                       <button
                         onClick={() => handleDelete(property._id)}
-                        className="flex-1 bg-red-500 text-white py-2 rounded-lg"
+                        disabled={deletingId === property._id}
+                        className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-red-500 py-2 text-white hover:bg-red-600 disabled:opacity-50"
                       >
-                        Delete Property
+                        {deletingId === property._id ? (
+                          <RefreshCw size={16} className="animate-spin" />
+                        ) : (
+                          <Trash2 size={16} />
+                        )}
+
+                        {deletingId === property._id
+                          ? "Deleting..."
+                          : "Delete Property"}
                       </button>
                     </div>
-
                   </div>
                 </div>
               );
             })}
-
           </div>
         )}
-
       </div>
     </div>
   );
@@ -499,9 +538,7 @@ export default function MyProperties() {
 function StatCard({ title, value, icon, color }) {
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-
       <div className="flex items-center justify-between">
-
         <div>
           <p className="text-sm font-medium text-gray-500">
             {title}
@@ -515,9 +552,7 @@ function StatCard({ title, value, icon, color }) {
         <div className={`rounded-xl p-3 ${color}`}>
           {icon}
         </div>
-
       </div>
-
     </div>
   );
 }
