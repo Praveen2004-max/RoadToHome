@@ -118,6 +118,10 @@ const startServer = async () => {
 
   } catch (error) {
     console.error("MongoDB Connection Error:", error.message);
+    console.error("Error Name:", error.name);
+    console.error("Error Cause:", error.cause?.message);
+    console.error("Error Reason:", error.reason?.message);
+
     process.exit(1);
   }
 };
