@@ -187,18 +187,26 @@ const addProperty = async (req, res) => {
       amenities,
     } = req.body;
 
+    // Parse FormData JSON fields
     const parsedLocation = parseField(location);
     const parsedArea = parseField(area);
     const parsedAmenities = parseField(amenities);
 
-    // IMPORTANT: Save Cloudinary HTTPS URLs, not local uploads paths.
+    // Cloudinary HTTPS image URLs
     const images = uploadedFiles
       .map((file) => file.path)
-      .filter((url) => typeof url === "string" && url.startsWith("https://"));
+      .filter(
+        (url) =>
+          typeof url === "string" &&
+          url.startsWith("https://")
+      );
 
+    // Validate basic details
     if (
-      !name?.trim() ||
-      !description?.trim() ||
+      typeof name !== "string" ||
+      !name.trim() ||
+      typeof description !== "string" ||
+      !description.trim() ||
       !propertyType ||
       !listingType ||
       price === undefined ||
@@ -213,10 +221,15 @@ const addProperty = async (req, res) => {
       });
     }
 
+    // Validate location
     if (
-      !parsedLocation?.address?.trim?.() ||
-      !parsedLocation?.city?.trim?.() ||
-      !parsedLocation?.state?.trim?.()
+      !parsedLocation ||
+      typeof parsedLocation.address !== "string" ||
+      !parsedLocation.address.trim() ||
+      typeof parsedLocation.city !== "string" ||
+      !parsedLocation.city.trim() ||
+      typeof parsedLocation.state !== "string" ||
+      !parsedLocation.state.trim()
     ) {
       await cleanupUploadedFiles(uploadedFiles);
 
@@ -226,7 +239,12 @@ const addProperty = async (req, res) => {
       });
     }
 
-    if (!parsedArea?.value || Number(parsedArea.value) <= 0) {
+    // Validate area
+    if (
+      !parsedArea ||
+      !Number.isFinite(Number(parsedArea.value)) ||
+      Number(parsedArea.value) <= 0
+    ) {
       await cleanupUploadedFiles(uploadedFiles);
 
       return res.status(400).json({
@@ -235,6 +253,7 @@ const addProperty = async (req, res) => {
       });
     }
 
+    // Validate amenities
     if (!Array.isArray(parsedAmenities)) {
       await cleanupUploadedFiles(uploadedFiles);
 
@@ -244,6 +263,7 @@ const addProperty = async (req, res) => {
       });
     }
 
+    // Validate images
     if (!images.length) {
       await cleanupUploadedFiles(uploadedFiles);
 
@@ -253,6 +273,7 @@ const addProperty = async (req, res) => {
       });
     }
 
+    // Save property in MongoDB
     const property = await Property.create({
       name: name.trim(),
       description: description.trim(),
@@ -260,20 +281,40 @@ const addProperty = async (req, res) => {
       listingType,
       price: Number(price),
       priceType: priceType || "Negotiable",
-      location: parsedLocation,
+
+      location: {
+        address: parsedLocation.address.trim(),
+        city: parsedLocation.city.trim(),
+        state: parsedLocation.state.trim(),
+        country: parsedLocation.country || "India",
+        pincode: parsedLocation.pincode || "",
+      },
+
       bedrooms: Number(bedrooms) || 0,
       bathrooms: Number(bathrooms) || 0,
       balconies: Number(balconies) || 0,
-      area: parsedArea,
+
+      area: {
+        value: Number(parsedArea.value),
+        unit: parsedArea.unit || "sqft",
+      },
+
       furnishing: furnishing || "Unfurnished",
-      amenities,
+
+      // IMPORTANT: Use parsedAmenities, not raw amenities
+      amenities: parsedAmenities,
+
+      // Cloudinary URLs
       images,
+
       owner: userId,
+
       approvalStatus: "Pending",
       rejectionReason: "",
       status: "Available",
     });
 
+    // Notify admins
     await notifyAdmins({
       title: "New Property Submitted",
       message: `${property.name} has been submitted and is waiting for admin approval.`,
@@ -285,10 +326,13 @@ const addProperty = async (req, res) => {
       message: "Property submitted for admin approval",
       property,
     });
+
   } catch (error) {
     await cleanupUploadedFiles(uploadedFiles);
 
-    console.error("Add Property Error:", error);
+    console.error("Add Property Error:", error.message);
+    console.error("Error Name:", error.name);
+    console.error("Error Stack:", error.stack);
 
     return res.status(500).json({
       success: false,
@@ -297,7 +341,6 @@ const addProperty = async (req, res) => {
     });
   }
 };
-
 // ==========================================
 // GET ALL PUBLIC PROPERTIES
 // ==========================================
