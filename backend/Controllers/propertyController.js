@@ -1,13 +1,107 @@
+
 const Property = require("../Modules/property");
 const Notification = require("../Modules/Notification");
 const User = require("../Modules/user");
+const cloudinary = require("../Config/cloudinary");
 const mongoose = require("mongoose");
 
 // ==========================================
-// NOTIFICATION HELPERS
+// COMMON HELPERS
 // ==========================================
 
-// Send notification to specific users
+const parseField = (value) => {
+  if (typeof value !== "string") return value;
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+};
+
+const getUserId = (req) => req.user?.id || req.user?._id;
+
+const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
+
+// Get Cloudinary public ID from a standard uploaded secure_url.
+// This assumes URLs are stored as returned by Cloudinary upload_stream,
+// without additional URL transformations.
+const getCloudinaryPublicId = (imageUrl) => {
+  if (typeof imageUrl !== "string" ||
+      !imageUrl.includes("res.cloudinary.com")) {
+    return null;
+  }
+
+  try {
+    const pathname = new URL(imageUrl).pathname;
+    const marker = "/upload/";
+    const index = pathname.indexOf(marker);
+
+    if (index === -1) return null;
+
+    let imagePath = pathname.substring(index + marker.length);
+
+    // Remove Cloudinary version prefix.
+    imagePath = imagePath.replace(/^v\d+\//, "");
+
+    // Remove file extension.
+    imagePath = imagePath.replace(/\.[^/.]+$/, "");
+
+    return imagePath || null;
+  } catch {
+    return null;
+  }
+};
+
+// Delete Cloudinary images using their URLs.
+const deleteCloudinaryImages = async (images = []) => {
+  const publicIds = [
+    ...new Set(
+      images
+        .map(getCloudinaryPublicId)
+        .filter(Boolean)
+    ),
+  ];
+
+  if (!publicIds.length) return;
+
+  const results = await Promise.allSettled(
+    publicIds.map((publicId) =>
+      cloudinary.uploader.destroy(publicId, {
+        resource_type: "image",
+      })
+    )
+  );
+
+  results.forEach((result) => {
+    if (result.status === "rejected") {
+      console.error("Cloudinary delete error:", result.reason);
+    }
+  });
+};
+
+// Delete newly uploaded files if a request fails.
+const cleanupUploadedFiles = async (files = []) => {
+  const publicIds = [
+    ...new Set(
+      files
+        .map((file) => file.public_id || file.filename)
+        .filter(Boolean)
+    ),
+  ];
+
+  if (!publicIds.length) return;
+
+  await Promise.allSettled(
+    publicIds.map((publicId) =>
+      cloudinary.uploader.destroy(publicId, {
+        resource_type: "image",
+      })
+    )
+  );
+};
+
+// Notifications
 const sendPropertyNotification = async ({
   recipients,
   title,
@@ -15,7 +109,7 @@ const sendPropertyNotification = async ({
   link = "/my-properties",
 }) => {
   try {
-    if (!recipients || recipients.length === 0) return;
+    if (!recipients?.length) return;
 
     const uniqueRecipients = [
       ...new Set(
@@ -27,28 +121,25 @@ const sendPropertyNotification = async ({
 
     if (!uniqueRecipients.length) return;
 
-    const notifications = uniqueRecipients.map((recipientId) => ({
-      recipient: recipientId,
-      title,
-      message,
-      type: "property",
-      link,
-    }));
-
-    await Notification.insertMany(notifications);
+    await Notification.insertMany(
+      uniqueRecipients.map((recipientId) => ({
+        recipient: recipientId,
+        title,
+        message,
+        type: "property",
+        link,
+      }))
+    );
   } catch (error) {
     console.error("Property Notification Error:", error.message);
   }
 };
 
-// Send notification to all admins
 const notifyAdmins = async ({ title, message, link }) => {
   try {
     const admins = await User.find({ role: "admin" })
       .select("_id")
       .lean();
-
-    if (!admins.length) return;
 
     await sendPropertyNotification({
       recipients: admins.map((admin) => admin._id),
@@ -61,26 +152,19 @@ const notifyAdmins = async ({ title, message, link }) => {
   }
 };
 
-
-// Parse JSON data received through FormData
-const parseField = (value) => {
-  if (typeof value !== "string") return value;
-
-  try {
-    return JSON.parse(value);
-  } catch {
-    return value;
-  }
-};
-
-
 // ==========================================
 // ADD PROPERTY
 // ==========================================
 
 const addProperty = async (req, res) => {
+  const uploadedFiles = req.files || [];
+
   try {
-    if (!req.user) {
+    const userId = getUserId(req);
+
+    if (!userId || !isValidId(userId)) {
+      await cleanupUploadedFiles(uploadedFiles);
+
       return res.status(401).json({
         success: false,
         message: "Please login first",
@@ -107,9 +191,10 @@ const addProperty = async (req, res) => {
     const parsedArea = parseField(area);
     const parsedAmenities = parseField(amenities);
 
-    const images = (req.files || []).map(
-      (file) => `/uploads/${file.filename}`
-    );
+    // IMPORTANT: Save Cloudinary HTTPS URLs, not local uploads paths.
+    const images = uploadedFiles
+      .map((file) => file.path)
+      .filter((url) => typeof url === "string" && url.startsWith("https://"));
 
     if (
       !name?.trim() ||
@@ -117,8 +202,11 @@ const addProperty = async (req, res) => {
       !propertyType ||
       !listingType ||
       price === undefined ||
+      !Number.isFinite(Number(price)) ||
       Number(price) <= 0
     ) {
+      await cleanupUploadedFiles(uploadedFiles);
+
       return res.status(400).json({
         success: false,
         message: "Please fill all required property details",
@@ -126,10 +214,12 @@ const addProperty = async (req, res) => {
     }
 
     if (
-      !parsedLocation?.city ||
-      !parsedLocation?.state ||
-      !parsedLocation?.address
+      !parsedLocation?.address?.trim?.() ||
+      !parsedLocation?.city?.trim?.() ||
+      !parsedLocation?.state?.trim?.()
     ) {
+      await cleanupUploadedFiles(uploadedFiles);
+
       return res.status(400).json({
         success: false,
         message: "Valid property location is required",
@@ -137,25 +227,29 @@ const addProperty = async (req, res) => {
     }
 
     if (!parsedArea?.value || Number(parsedArea.value) <= 0) {
+      await cleanupUploadedFiles(uploadedFiles);
+
       return res.status(400).json({
         success: false,
         message: "Valid property area is required",
       });
     }
 
-    if (images.length === 0) {
+    if (!Array.isArray(parsedAmenities)) {
+      await cleanupUploadedFiles(uploadedFiles);
+
       return res.status(400).json({
         success: false,
-        message: "Please upload at least one property image",
+        message: "Invalid amenities data",
       });
     }
 
-    const ownerId = req.user.id || req.user._id;
+    if (!images.length) {
+      await cleanupUploadedFiles(uploadedFiles);
 
-    if (!ownerId || !mongoose.Types.ObjectId.isValid(ownerId)) {
-      return res.status(401).json({
+      return res.status(400).json({
         success: false,
-        message: "Invalid logged-in user",
+        message: "Please upload at least one property image",
       });
     }
 
@@ -172,21 +266,17 @@ const addProperty = async (req, res) => {
       balconies: Number(balconies) || 0,
       area: parsedArea,
       furnishing: furnishing || "Unfurnished",
-      amenities: Array.isArray(parsedAmenities)
-        ? parsedAmenities
-        : [],
+      amenities,
       images,
-      owner: ownerId,
-
+      owner: userId,
       approvalStatus: "Pending",
       rejectionReason: "",
       status: "Available",
     });
 
-    // Notify admins about new property
     await notifyAdmins({
       title: "New Property Submitted",
-      message: `${name.trim()} has been submitted and is waiting for admin approval.`,
+      message: `${property.name} has been submitted and is waiting for admin approval.`,
       link: "/dashboard/properties",
     });
 
@@ -196,15 +286,17 @@ const addProperty = async (req, res) => {
       property,
     });
   } catch (error) {
+    await cleanupUploadedFiles(uploadedFiles);
+
     console.error("Add Property Error:", error);
 
     return res.status(500).json({
       success: false,
-      message: error.message,
+      message: "Unable to add property",
+      error: error.message,
     });
   }
 };
-
 
 // ==========================================
 // GET ALL PUBLIC PROPERTIES
@@ -266,7 +358,6 @@ const getAllProperties = async (req, res) => {
   }
 };
 
-
 // ==========================================
 // GET SINGLE PUBLIC PROPERTY
 // ==========================================
@@ -275,7 +366,7 @@ const getSingleProperty = async (req, res) => {
   try {
     const { id } = req.params;
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    if (!isValidId(id)) {
       return res.status(400).json({
         success: false,
         message: "Invalid Property ID",
@@ -313,14 +404,13 @@ const getSingleProperty = async (req, res) => {
   }
 };
 
-
 // ==========================================
 // GET MY PROPERTIES
 // ==========================================
 
 const getMyProperties = async (req, res) => {
   try {
-    const userId = req.user?.id || req.user?._id;
+    const userId = getUserId(req);
 
     if (!userId) {
       return res.status(401).json({
@@ -346,9 +436,8 @@ const getMyProperties = async (req, res) => {
   }
 };
 
-
 // ==========================================
-// GET PENDING PROPERTIES (ADMIN)
+// GET PENDING PROPERTIES - ADMIN
 // ==========================================
 
 const getPendingProperties = async (req, res) => {
@@ -372,16 +461,15 @@ const getPendingProperties = async (req, res) => {
   }
 };
 
-
 // ==========================================
-// APPROVE PROPERTY (ADMIN)
+// APPROVE PROPERTY - ADMIN
 // ==========================================
 
 const approveProperty = async (req, res) => {
   try {
     const { id } = req.params;
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    if (!isValidId(id)) {
       return res.status(400).json({
         success: false,
         message: "Invalid Property ID",
@@ -402,11 +490,10 @@ const approveProperty = async (req, res) => {
 
     await property.save();
 
-    // Notify property owner
     await sendPropertyNotification({
       recipients: [property.owner],
       title: "Property Approved",
-      message: `Congratulations! Your property "${property.name}" has been approved and is now visible on GharFinder.`,
+      message: `Congratulations! Your property "${property.name}" has been approved and is now visible.`,
       link: "/my-properties",
     });
 
@@ -423,9 +510,8 @@ const approveProperty = async (req, res) => {
   }
 };
 
-
 // ==========================================
-// REJECT PROPERTY (ADMIN)
+// REJECT PROPERTY - ADMIN
 // ==========================================
 
 const rejectProperty = async (req, res) => {
@@ -433,7 +519,7 @@ const rejectProperty = async (req, res) => {
     const { id } = req.params;
     const { reason } = req.body;
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    if (!isValidId(id)) {
       return res.status(400).json({
         success: false,
         message: "Invalid Property ID",
@@ -461,7 +547,6 @@ const rejectProperty = async (req, res) => {
 
     await property.save();
 
-    // Notify property owner with rejection reason
     await sendPropertyNotification({
       recipients: [property.owner],
       title: "Property Rejected",
@@ -482,16 +567,19 @@ const rejectProperty = async (req, res) => {
   }
 };
 
-
 // ==========================================
 // UPDATE PROPERTY
 // ==========================================
 
 const updateProperty = async (req, res) => {
+  const uploadedFiles = req.files || [];
+
   try {
     const { id } = req.params;
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    if (!isValidId(id)) {
+      await cleanupUploadedFiles(uploadedFiles);
+
       return res.status(400).json({
         success: false,
         message: "Invalid Property ID",
@@ -501,18 +589,24 @@ const updateProperty = async (req, res) => {
     const property = await Property.findById(id);
 
     if (!property) {
+      await cleanupUploadedFiles(uploadedFiles);
+
       return res.status(404).json({
         success: false,
         message: "Property Not Found",
       });
     }
 
-    const userId = req.user?.id || req.user?._id;
+    const userId = getUserId(req);
 
-    if (
-      property.owner.toString() !== userId?.toString() &&
-      req.user?.role !== "admin"
-    ) {
+    const isOwner =
+      property.owner.toString() === userId?.toString();
+
+    const isAdmin = req.user?.role === "admin";
+
+    if (!isOwner && !isAdmin) {
+      await cleanupUploadedFiles(uploadedFiles);
+
       return res.status(403).json({
         success: false,
         message: "You are not authorized",
@@ -553,6 +647,8 @@ const updateProperty = async (req, res) => {
       const parsedAmenities = parseField(req.body.amenities);
 
       if (!Array.isArray(parsedAmenities)) {
+        await cleanupUploadedFiles(uploadedFiles);
+
         return res.status(400).json({
           success: false,
           message: "Invalid amenities data",
@@ -562,43 +658,56 @@ const updateProperty = async (req, res) => {
       property.amenities = parsedAmenities;
     }
 
-    // Handle existing and new images
+    // Keep only images that already belong to this property.
     let existingImages = property.images || [];
 
     if (req.body.existingImages !== undefined) {
-      existingImages = parseField(req.body.existingImages);
+      const requestedImages = parseField(req.body.existingImages);
 
-      if (!Array.isArray(existingImages)) {
+      if (!Array.isArray(requestedImages)) {
+        await cleanupUploadedFiles(uploadedFiles);
+
         return res.status(400).json({
           success: false,
           message: "Invalid existing images data",
         });
       }
+
+      existingImages = requestedImages.filter((url) =>
+        property.images.includes(url)
+      );
     }
 
-    const newImages = req.files?.length
-      ? req.files.map((file) => `/uploads/${file.filename}`)
-      : [];
+    // New Cloudinary HTTPS URLs.
+    const newImages = uploadedFiles
+      .map((file) => file.path)
+      .filter((url) => typeof url === "string" && url.startsWith("https://"));
+
+    const oldImages = [...(property.images || [])];
 
     property.images = [...existingImages, ...newImages];
 
-    // Owner edits require fresh admin approval
-    if (req.user?.role !== "admin") {
+    if (isOwner && !isAdmin) {
       property.approvalStatus = "Pending";
       property.rejectionReason = "";
+    }
 
-      await property.save();
+    await property.save();
 
-      // Notify admins about edited property
+    // Delete removed images only after successful database save.
+    const removedImages = oldImages.filter(
+      (url) => !property.images.includes(url)
+    );
+
+    await deleteCloudinaryImages(removedImages);
+
+    if (isOwner && !isAdmin) {
       await notifyAdmins({
         title: "Property Updated",
         message: `The owner has updated "${property.name}". It is waiting for admin approval.`,
         link: "/dashboard/properties",
       });
     } else {
-      await property.save();
-
-      // Notify owner if admin updates the property
       await sendPropertyNotification({
         recipients: [property.owner],
         title: "Property Updated By Admin",
@@ -613,6 +722,8 @@ const updateProperty = async (req, res) => {
       property,
     });
   } catch (error) {
+    await cleanupUploadedFiles(uploadedFiles);
+
     console.error("Update Property Error:", error);
 
     return res.status(500).json({
@@ -622,7 +733,6 @@ const updateProperty = async (req, res) => {
   }
 };
 
-
 // ==========================================
 // DELETE PROPERTY
 // ==========================================
@@ -631,7 +741,7 @@ const deleteProperty = async (req, res) => {
   try {
     const { id } = req.params;
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    if (!isValidId(id)) {
       return res.status(400).json({
         success: false,
         message: "Invalid Property ID",
@@ -647,12 +757,14 @@ const deleteProperty = async (req, res) => {
       });
     }
 
-    const userId = req.user?.id || req.user?._id;
+    const userId = getUserId(req);
 
-    if (
-      property.owner.toString() !== userId?.toString() &&
-      req.user?.role !== "admin"
-    ) {
+    const isOwner =
+      property.owner.toString() === userId?.toString();
+
+    const isAdmin = req.user?.role === "admin";
+
+    if (!isOwner && !isAdmin) {
       return res.status(403).json({
         success: false,
         message: "You are not authorized",
@@ -661,11 +773,14 @@ const deleteProperty = async (req, res) => {
 
     const ownerId = property.owner;
     const propertyName = property.name;
+    const imagesToDelete = [...(property.images || [])];
 
     await Property.findByIdAndDelete(id);
 
-    // Notify owner when admin deletes their property
-    if (req.user?.role === "admin") {
+    // Delete images after the property is deleted from MongoDB.
+    await deleteCloudinaryImages(imagesToDelete);
+
+    if (isAdmin) {
       await sendPropertyNotification({
         recipients: [ownerId],
         title: "Property Deleted",
@@ -679,13 +794,14 @@ const deleteProperty = async (req, res) => {
       message: "Property Deleted Successfully",
     });
   } catch (error) {
+    console.error("Delete Property Error:", error);
+
     return res.status(500).json({
       success: false,
       message: error.message,
     });
   }
 };
-
 
 // ==========================================
 // GET SINGLE PROPERTY OF LOGGED-IN OWNER
@@ -694,9 +810,9 @@ const deleteProperty = async (req, res) => {
 const getMySingleProperty = async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.user?.id || req.user?._id;
+    const userId = getUserId(req);
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    if (!isValidId(id)) {
       return res.status(400).json({
         success: false,
         message: "Invalid Property ID",
@@ -730,7 +846,6 @@ const getMySingleProperty = async (req, res) => {
   }
 };
 
-
 // ==========================================
 // ADMIN DASHBOARD - PROPERTY OVERVIEW
 // ==========================================
@@ -740,17 +855,10 @@ const getPropertyOverview = async (req, res) => {
     const period = req.query.period || "6 Months";
     const now = new Date();
 
-    let startDate;
-
-    if (period === "This Year") {
-      startDate = new Date(now.getFullYear(), 0, 1);
-    } else {
-      startDate = new Date(
-        now.getFullYear(),
-        now.getMonth() - 5,
-        1
-      );
-    }
+    const startDate =
+      period === "This Year"
+        ? new Date(now.getFullYear(), 0, 1)
+        : new Date(now.getFullYear(), now.getMonth() - 5, 1);
 
     const [
       totalProperties,
@@ -816,8 +924,8 @@ const getPropertyOverview = async (req, res) => {
       ]),
     ]);
 
-    const chartData = [];
     const monthCount = period === "This Year" ? 12 : 6;
+    const chartData = [];
 
     for (let i = 0; i < monthCount; i++) {
       const date = new Date(
@@ -826,20 +934,17 @@ const getPropertyOverview = async (req, res) => {
         1
       );
 
-      const monthNumber = date.getMonth() + 1;
-      const year = date.getFullYear();
-
       const found = monthlyProperties.find(
         (item) =>
-          item._id.month === monthNumber &&
-          item._id.year === year
+          item._id.month === date.getMonth() + 1 &&
+          item._id.year === date.getFullYear()
       );
 
       chartData.push({
         month: date.toLocaleString("en-IN", {
           month: "short",
         }),
-        properties: found ? found.properties : 0,
+        properties: found?.properties || 0,
       });
     }
 
@@ -868,7 +973,6 @@ const getPropertyOverview = async (req, res) => {
   }
 };
 
-
 // ==========================================
 // GET FEATURED PROPERTIES
 // ==========================================
@@ -896,7 +1000,6 @@ const getFeaturedProperties = async (req, res) => {
     });
   }
 };
-
 
 // ==========================================
 // GET LATEST PROPERTIES
@@ -929,7 +1032,6 @@ const getLatestProperties = async (req, res) => {
     });
   }
 };
-
 
 // ==========================================
 // GET PROPERTY CATEGORY COUNTS
@@ -970,7 +1072,6 @@ const getPropertyCategories = async (req, res) => {
   }
 };
 
-
 // ==========================================
 // GET POPULAR LOCATIONS
 // ==========================================
@@ -982,7 +1083,10 @@ const getPopularLocations = async (req, res) => {
         $match: {
           approvalStatus: "Approved",
           status: "Available",
-          "location.city": { $exists: true, $ne: "" },
+          "location.city": {
+            $exists: true,
+            $ne: "",
+          },
         },
       },
       {
@@ -1014,9 +1118,8 @@ const getPopularLocations = async (req, res) => {
   }
 };
 
-
 // ==========================================
-// TOGGLE FEATURED PROPERTY (ADMIN)
+// TOGGLE FEATURED PROPERTY - ADMIN
 // ==========================================
 
 const toggleFeaturedProperty = async (req, res) => {
@@ -1024,7 +1127,7 @@ const toggleFeaturedProperty = async (req, res) => {
     const { id } = req.params;
     const { isFeatured } = req.body;
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    if (!isValidId(id)) {
       return res.status(400).json({
         success: false,
         message: "Invalid Property ID",
@@ -1060,7 +1163,6 @@ const toggleFeaturedProperty = async (req, res) => {
     property.isFeatured = isFeatured;
     await property.save();
 
-    // Notify property owner
     await sendPropertyNotification({
       recipients: [property.owner],
       title: isFeatured
@@ -1087,7 +1189,6 @@ const toggleFeaturedProperty = async (req, res) => {
   }
 };
 
-
 // ==========================================
 // EXPORTS
 // ==========================================
@@ -1109,4 +1210,5 @@ module.exports = {
   getPropertyCategories,
   getPopularLocations,
   toggleFeaturedProperty,
+  deleteCloudinaryImages,
 };

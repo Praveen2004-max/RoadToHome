@@ -1,13 +1,73 @@
+
 const User = require("../Modules/user");
 const Notification = require("../Modules/Notification");
+const cloudinary = require("../Config/cloudinary");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+
+// ==========================================
+// CLOUDINARY HELPERS
+// ==========================================
+
+// Get Cloudinary public ID from an uploaded file.
+const getUploadedPublicId = (file) => {
+  return file?.public_id || file?.filename || null;
+};
+
+// Extract public ID from a standard Cloudinary URL.
+// Works for URLs without additional transformations.
+const getCloudinaryPublicId = (imageUrl) => {
+  if (
+    typeof imageUrl !== "string" ||
+    !imageUrl.includes("res.cloudinary.com")
+  ) {
+    return null;
+  }
+
+  try {
+    const pathname = new URL(imageUrl).pathname;
+    const marker = "/upload/";
+    const index = pathname.indexOf(marker);
+
+    if (index === -1) return null;
+
+    let imagePath = pathname.substring(index + marker.length);
+
+    imagePath = imagePath.replace(/^v\d+\//, "");
+    imagePath = imagePath.replace(/\.[^/.]+$/, "");
+
+    return imagePath || null;
+  } catch {
+    return null;
+  }
+};
+
+// Delete Cloudinary image using public ID.
+const deleteCloudinaryImage = async (publicId) => {
+  if (!publicId) return;
+
+  try {
+    await cloudinary.uploader.destroy(publicId, {
+      resource_type: "image",
+    });
+  } catch (error) {
+    console.error("Cloudinary Image Delete Error:", error.message);
+  }
+};
+
+// Clean up a newly uploaded image if request fails.
+const cleanupUploadedImage = async (file) => {
+  const publicId = getUploadedPublicId(file);
+
+  if (publicId) {
+    await deleteCloudinaryImage(publicId);
+  }
+};
 
 // ==========================================
 // NOTIFICATION HELPERS
 // ==========================================
 
-// Send notification to specific users
 const sendUserNotification = async ({
   recipients,
   title,
@@ -15,7 +75,7 @@ const sendUserNotification = async ({
   link = "/my-profile",
 }) => {
   try {
-    if (!recipients || recipients.length === 0) return;
+    if (!recipients?.length) return;
 
     const uniqueRecipients = [
       ...new Set(
@@ -41,7 +101,6 @@ const sendUserNotification = async ({
   }
 };
 
-// Notify all admins
 const notifyAdmins = async ({ title, message }) => {
   try {
     const admins = await User.find({
@@ -63,21 +122,19 @@ const notifyAdmins = async ({ title, message }) => {
   }
 };
 
-
 // ==========================================
 // SIGN UP
 // ==========================================
 
 const signUP = async (req, res) => {
+  const uploadedFile = req.file;
+
   try {
-    const {
-      fullName,
-      email,
-      phone,
-      password,
-    } = req.body;
+    const { fullName, email, phone, password } = req.body;
 
     if (!fullName || !email || !phone || !password) {
+      await cleanupUploadedImage(uploadedFile);
+
       return res.status(400).json({
         success: false,
         message: "Please fill all required fields!",
@@ -89,46 +146,55 @@ const signUP = async (req, res) => {
     const cleanPhone = String(phone).trim();
 
     if (!cleanFullName || !normalizedEmail || !cleanPhone) {
+      await cleanupUploadedImage(uploadedFile);
+
       return res.status(400).json({
         success: false,
         message: "Please provide valid registration details.",
       });
     }
 
-    if (String(password).length < 6) {
+    if (String(password).length < 8) {
+      await cleanupUploadedImage(uploadedFile);
+
       return res.status(400).json({
         success: false,
-        message: "Password must be at least 6 characters.",
+        message: "Password must be at least 8 characters.",
       });
     }
 
-    // Check existing email
+    if (uploadedFile && !uploadedFile.path?.startsWith("https://")) {
+      await cleanupUploadedImage(uploadedFile);
+
+      return res.status(400).json({
+        success: false,
+        message: "Profile image upload failed. Please try again.",
+      });
+    }
+
     const existingUser = await User.findOne({
       email: normalizedEmail,
     });
 
     if (existingUser) {
+      await cleanupUploadedImage(uploadedFile);
+
       return res.status(409).json({
         success: false,
         message: "Email already exists.",
       });
     }
 
-    // Hash password
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    // Create user
     const user = await User.create({
       fullName: cleanFullName,
       email: normalizedEmail,
       phone: cleanPhone,
       password: hashedPassword,
-      profileImage: req.file
-        ? `/uploads/${req.file.filename}`
-        : "",
+      profileImage: uploadedFile ? uploadedFile.path : "",
     });
 
-    // Welcome notification to newly registered user
     await sendUserNotification({
       recipients: [user._id],
       title: "Welcome to RoadToHome!",
@@ -136,7 +202,6 @@ const signUP = async (req, res) => {
       link: "/my-profile",
     });
 
-    // Notify admins about new registration
     await notifyAdmins({
       title: "New User Registered",
       message: `${user.fullName} has created a new RoadToHome account.`,
@@ -155,6 +220,8 @@ const signUP = async (req, res) => {
       },
     });
   } catch (error) {
+    await cleanupUploadedImage(uploadedFile);
+
     console.error("Sign Up Error:", error);
 
     if (error.code === 11000) {
@@ -166,11 +233,11 @@ const signUP = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: error.message,
+      message: "Unable to create account.",
+      error: error.message,
     });
   }
 };
-
 
 // ==========================================
 // SIGN IN
@@ -219,7 +286,6 @@ const signIN = async (req, res) => {
       });
     }
 
-    // Generate JWT token
     const token = jwt.sign(
       {
         id: user._id,
@@ -250,11 +316,11 @@ const signIN = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: error.message,
+      message: "Unable to sign in.",
+      error: error.message,
     });
   }
 };
-
 
 // ==========================================
 // GET MY PROFILE
@@ -294,12 +360,13 @@ const getMyProfile = async (req, res) => {
   }
 };
 
-
 // ==========================================
 // UPDATE MY PROFILE
 // ==========================================
 
 const updateMyProfile = async (req, res) => {
+  const uploadedFile = req.file;
+
   try {
     const {
       fullName,
@@ -313,6 +380,8 @@ const updateMyProfile = async (req, res) => {
     const userId = req.user?.id || req.user?._id;
 
     if (!userId) {
+      await cleanupUploadedImage(uploadedFile);
+
       return res.status(401).json({
         success: false,
         message: "Please login first.",
@@ -322,17 +391,21 @@ const updateMyProfile = async (req, res) => {
     const user = await User.findById(userId);
 
     if (!user) {
+      await cleanupUploadedImage(uploadedFile);
+
       return res.status(404).json({
         success: false,
         message: "User not found.",
       });
     }
 
-    // Validate full name
+    // Validate full name.
     if (fullName !== undefined) {
       const cleanFullName = String(fullName).trim();
 
       if (!cleanFullName) {
+        await cleanupUploadedImage(uploadedFile);
+
         return res.status(400).json({
           success: false,
           message: "Full name cannot be empty.",
@@ -342,11 +415,13 @@ const updateMyProfile = async (req, res) => {
       user.fullName = cleanFullName;
     }
 
-    // Validate and update email
+    // Validate and update email.
     if (email !== undefined) {
       const normalizedEmail = String(email).trim().toLowerCase();
 
       if (!normalizedEmail) {
+        await cleanupUploadedImage(uploadedFile);
+
         return res.status(400).json({
           success: false,
           message: "Email cannot be empty.",
@@ -359,6 +434,8 @@ const updateMyProfile = async (req, res) => {
       });
 
       if (existingEmail) {
+        await cleanupUploadedImage(uploadedFile);
+
         return res.status(409).json({
           success: false,
           message: "This email is already registered.",
@@ -384,14 +461,38 @@ const updateMyProfile = async (req, res) => {
       user.bio = String(bio).trim();
     }
 
-    // Update profile image
-    if (req.file) {
-      user.profileImage = `/uploads/${req.file.filename}`;
+    // Keep the old image until the new profile is saved.
+    const oldProfileImage = user.profileImage;
+
+    if (uploadedFile) {
+      if (!uploadedFile.path?.startsWith("https://")) {
+        await cleanupUploadedImage(uploadedFile);
+
+        return res.status(400).json({
+          success: false,
+          message: "Profile image upload failed. Please try again.",
+        });
+      }
+
+      // Cloudinary HTTPS URL.
+      user.profileImage = uploadedFile.path;
     }
 
     await user.save();
 
-    // Notify user about profile update
+    // Delete old Cloudinary image only after successful save.
+    if (
+      uploadedFile &&
+      oldProfileImage &&
+      oldProfileImage !== user.profileImage
+    ) {
+      const oldPublicId = getCloudinaryPublicId(oldProfileImage);
+
+      if (oldPublicId) {
+        await deleteCloudinaryImage(oldPublicId);
+      }
+    }
+
     await sendUserNotification({
       recipients: [user._id],
       title: "Profile Updated",
@@ -417,6 +518,8 @@ const updateMyProfile = async (req, res) => {
       },
     });
   } catch (error) {
+    await cleanupUploadedImage(uploadedFile);
+
     console.error("Update Profile Error:", error);
 
     if (error.code === 11000) {
@@ -428,11 +531,11 @@ const updateMyProfile = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: error.message,
+      message: "Unable to update profile.",
+      error: error.message,
     });
   }
 };
-
 
 // ==========================================
 // ADMIN - GET ALL REGISTERED USERS
@@ -461,7 +564,6 @@ const getAllUsers = async (req, res) => {
     });
   }
 };
-
 
 // ==========================================
 // EXPORTS

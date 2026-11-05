@@ -1,38 +1,64 @@
+
 const multer = require("multer");
-const path = require("path");
-const fs = require("fs");
+const cloudinary = require("../Config/cloudinary");
 
-const uploadDir = path.join(__dirname, "../uploads");
+const storage = {
+    _handleFile(req, file, cb) {
+        const stream = cloudinary.uploader.upload_stream(
+            {
+                folder: "RoadToHome",
+                resource_type: "image",
+                transformation: [
+                    { width: 1200, height: 900, crop: "limit" },
+                    { quality: "auto" },
+                ],
+            },
+            (error, result) => {
+                if (error) return cb(error);
 
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
+                cb(null, {
+                    path: result.secure_url,
+                    filename: result.public_id,
+                    public_id: result.public_id,
+                    size: result.bytes,
+                    mimetype: `image/${result.format}`,
+                });
+            }
+        );
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadDir);
-  },
+        file.stream.pipe(stream);
+    },
 
-  filename: (req, file, cb) => {
-    const uniqueName =
-      Date.now() + "-" + Math.round(Math.random() * 1e9);
+    _removeFile(req, file, cb) {
+        if (!file.public_id) return cb(null);
 
-    cb(null, uniqueName + path.extname(file.originalname));
-  }
-});
+        cloudinary.uploader.destroy(
+            file.public_id,
+            { resource_type: "image" },
+            (error) => cb(error)
+        );
+    },
+};
 
 const fileFilter = (req, file, cb) => {
-  if (file.mimetype.startsWith("image/")) {
-    cb(null, true);
-  } else {
-    cb(new Error("Only image files are allowed"), false);
-  }
+    const allowed = [
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+    ];
+
+    if (allowed.includes(file.mimetype)) {
+        return cb(null, true);
+    }
+
+    cb(new Error("Only JPG, PNG and WEBP images are allowed"));
 };
 
 module.exports = multer({
-  storage,
-  fileFilter,
-  limits: {
-    fileSize: 5 * 1024 * 1024
-  }
+    storage,
+    fileFilter,
+    limits: {
+        fileSize: 5 * 1024 * 1024,
+        files: 10,
+    },
 });

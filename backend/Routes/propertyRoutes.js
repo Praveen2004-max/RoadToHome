@@ -4,34 +4,35 @@ const router = express.Router();
 
 // Controllers
 const {
-    addProperty,
-    getAllProperties,
-    getSingleProperty,
-    updateProperty,
-    deleteProperty,
-    getMyProperties,
-    getPendingProperties,
-    approveProperty,
-    rejectProperty,
-    getMySingleProperty,
-    getPropertyOverview,
-    getFeaturedProperties,
-    getLatestProperties,
-    getPropertyCategories,
-    getPopularLocations,
-    toggleFeaturedProperty,
+  addProperty,
+  getAllProperties,
+  getSingleProperty,
+  updateProperty,
+  deleteProperty,
+  getMyProperties,
+  getPendingProperties,
+  approveProperty,
+  rejectProperty,
+  getMySingleProperty,
+  getPropertyOverview,
+  getFeaturedProperties,
+  getLatestProperties,
+  getPropertyCategories,
+  getPopularLocations,
+  toggleFeaturedProperty,
 } = require("../Controllers/propertyController");
 
 // Middleware
 const {
-    protect,
-    adminOnly
-} = require("../middleware/authMiddleware");
+  protect,
+  adminOnly,
+} = require("../Middleware/authMiddleware");
 
-const upload = require("../middleware/uploads");
+const upload = require("../Middleware/uploads");
 
-
-/* PUBLIC HOME PAGE ROUTES */
+// ========================================
+// PUBLIC HOME PAGE ROUTES
+// ========================================
 
 router.get("/featured", getFeaturedProperties);
 
@@ -41,67 +42,72 @@ router.get("/categories", getPropertyCategories);
 
 router.get("/locations", getPopularLocations);
 
-// Existing public route
-router.get("/", getAllProperties);
+// ========================================
+// USER PROPERTY ROUTES
+// ========================================
 
-
-// PUBLIC ROUTES
-router.get("/", getAllProperties);
-
-// USER ROUTES
+// Get logged-in user's properties
 router.get("/my-properties", protect, getMyProperties);
 
+// Get one property belonging to logged-in user
+router.get("/my-properties/:id", protect, getMySingleProperty);
+
+// Add property (user/admin)
 router.post(
-    "/",
-    protect,
-    upload.array("images", 10),
-    addProperty
+  "/",
+  protect,
+  upload.array("images", 10),
+  addProperty
 );
 
-router.get(
-    "/my-properties/:id",
-    protect,
-    getMySingleProperty
-);
-
+// Update property (owner/admin authorization in controller)
 router.put(
-    "/:id",
-    protect,
-    upload.array("images", 10),
-    updateProperty
+  "/:id",
+  protect,
+  upload.array("images", 10),
+  updateProperty
 );
 
+// Delete property (owner/admin authorization in controller)
 router.delete("/:id", protect, deleteProperty);
 
-// ADMIN ROUTES
+// ========================================
+// ADMIN PROPERTY ROUTES
+// ========================================
+
+// Get pending properties
 router.get(
-    "/admin/pending",
-    protect,
-    adminOnly,
-    getPendingProperties
+  "/admin/pending",
+  protect,
+  adminOnly,
+  getPendingProperties
 );
 
+// Approve property
 router.patch(
-    "/admin/:id/approve",
-    protect,
-    adminOnly,
-    approveProperty
+  "/admin/:id/approve",
+  protect,
+  adminOnly,
+  approveProperty
 );
 
+// Reject property
 router.patch(
-    "/admin/:id/reject",
-    protect,
-    adminOnly,
-    rejectProperty
+  "/admin/:id/reject",
+  protect,
+  adminOnly,
+  rejectProperty
 );
 
+// Property overview
 router.get(
-    "/admin/overview",
-    protect,
-    adminOnly,
-    getPropertyOverview
+  "/admin/overview",
+  protect,
+  adminOnly,
+  getPropertyOverview
 );
 
+// Toggle featured property
 router.patch(
   "/:id/featured",
   protect,
@@ -109,7 +115,14 @@ router.patch(
   toggleFeaturedProperty
 );
 
-// SINGLE PROPERTY ROUTE
+// ========================================
+// PUBLIC PROPERTY ROUTES
+// ========================================
+
+// Get all properties
+router.get("/", getAllProperties);
+
+// Get single property
 router.get("/:id", getSingleProperty);
 
 module.exports = router;

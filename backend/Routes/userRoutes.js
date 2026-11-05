@@ -2,46 +2,67 @@
 const express = require("express");
 const router = express.Router();
 
-const upload = require("../middleware/uploads");
+// Upload Middleware
+const upload = require("../Middleware/uploads");
 
+// Controllers
 const {
-    signUP,
-    signIN,
-    getMyProfile,
-    updateMyProfile,
-    getAllUsers
+  signUP,
+  signIN,
+  getMyProfile,
+  updateMyProfile,
+  getAllUsers,
 } = require("../Controllers/userController");
 
+// Authentication Middleware
 const {
-    protect,
-    adminOnly
-} = require("../middleware/authMiddleware");
+  protect,
+  adminOnly,
+} = require("../Middleware/authMiddleware");
 
-// Authentication
+// ========================================
+// AUTHENTICATION ROUTES
+// ========================================
+
+// User Signup
 router.post(
-    "/signUp",
-    upload.single("profileImage"),
-    signUP
+  "/signUp",
+  upload.single("profileImage"),
+  signUP
 );
 
+// User Login
 router.post("/signIn", signIN);
 
-// User Profile
-router.get("/profile", protect, getMyProfile);
+// ========================================
+// USER PROFILE ROUTES
+// ========================================
 
-router.put(
-    "/profile",
-    protect,
-    upload.single("image"),
-    updateMyProfile
+// Get logged-in user's profile
+router.get(
+  "/profile",
+  protect,
+  getMyProfile
 );
 
-// Admin - All Registered Users
+// Update logged-in user's profile
+router.put(
+  "/profile",
+  protect,
+  upload.single("image"),
+  updateMyProfile
+);
+
+// ========================================
+// ADMIN ROUTES
+// ========================================
+
+// Get all registered users
 router.get(
-    "/admin/all",
-    protect,
-    adminOnly,
-    getAllUsers
+  "/admin/all",
+  protect,
+  adminOnly,
+  getAllUsers
 );
 
 module.exports = router;
