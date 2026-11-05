@@ -366,6 +366,7 @@ const getMyProfile = async (req, res) => {
 
 const updateMyProfile = async (req, res) => {
   const uploadedFile = req.file;
+  let profileSaved = false;
 
   try {
     const {
@@ -399,7 +400,7 @@ const updateMyProfile = async (req, res) => {
       });
     }
 
-    // Validate full name.
+    // Update full name
     if (fullName !== undefined) {
       const cleanFullName = String(fullName).trim();
 
@@ -415,7 +416,7 @@ const updateMyProfile = async (req, res) => {
       user.fullName = cleanFullName;
     }
 
-    // Validate and update email.
+    // Update email
     if (email !== undefined) {
       const normalizedEmail = String(email).trim().toLowerCase();
 
@@ -445,54 +446,81 @@ const updateMyProfile = async (req, res) => {
       user.email = normalizedEmail;
     }
 
+    // Update phone (User Schema uses Number)
     if (phone !== undefined) {
-      user.phone = String(phone).trim();
-    }
+      const cleanPhone = String(phone).trim();
 
-    if (gender !== undefined) {
-      user.gender = gender;
-    }
-
-    if (location !== undefined) {
-      user.location = String(location).trim();
-    }
-
-    if (bio !== undefined) {
-      user.bio = String(bio).trim();
-    }
-
-    // Keep the old image until the new profile is saved.
-    const oldProfileImage = user.profileImage;
-
-    if (uploadedFile) {
-      if (!uploadedFile.path?.startsWith("https://")) {
+      if (cleanPhone && !/^\d{10}$/.test(cleanPhone)) {
         await cleanupUploadedImage(uploadedFile);
 
         return res.status(400).json({
           success: false,
-          message: "Profile image upload failed. Please try again.",
+          message: "Please enter a valid 10-digit phone number.",
         });
       }
 
-      // Cloudinary HTTPS URL.
+      user.phone = cleanPhone ? Number(cleanPhone) : undefined;
+    }
+
+    // Update gender
+    if (gender !== undefined) {
+      user.gender = gender;
+    }
+
+    // Update location
+    if (location !== undefined) {
+      user.location = String(location).trim();
+    }
+
+    // Update bio
+    if (bio !== undefined) {
+      user.bio = String(bio).trim();
+    }
+
+    const oldProfileImage = user.profileImage;
+
+    // Update Cloudinary image
+    if (uploadedFile) {
+      if (
+        typeof uploadedFile.path !== "string" ||
+        !uploadedFile.path.startsWith("https://")
+      ) {
+        await cleanupUploadedImage(uploadedFile);
+
+        return res.status(400).json({
+          success: false,
+          message: "Profile image upload failed.",
+        });
+      }
+
       user.profileImage = uploadedFile.path;
     }
 
+    // Save user
     await user.save();
+    profileSaved = true;
 
-    // Delete old Cloudinary image only after successful save.
+    // Delete old image only after successful save
     if (
       uploadedFile &&
       oldProfileImage &&
       oldProfileImage !== user.profileImage
     ) {
-      const oldPublicId = getCloudinaryPublicId(oldProfileImage);
+      try {
+        const oldPublicId = getCloudinaryPublicId(oldProfileImage);
 
-      if (oldPublicId) {
-        await deleteCloudinaryImage(oldPublicId);
+        if (oldPublicId) {
+          await deleteCloudinaryImage(oldPublicId);
+        }
+      } catch (imageError) {
+        console.error(
+          "Old Profile Image Delete Error:",
+          imageError.message
+        );
       }
     }
 
+    // Send notification
     await sendUserNotification({
       recipients: [user._id],
       title: "Profile Updated",
@@ -517,8 +545,12 @@ const updateMyProfile = async (req, res) => {
         createdAt: user.createdAt,
       },
     });
+
   } catch (error) {
-    await cleanupUploadedImage(uploadedFile);
+    // Do not delete the new image if profile was already saved.
+    if (!profileSaved) {
+      await cleanupUploadedImage(uploadedFile);
+    }
 
     console.error("Update Profile Error:", error);
 
