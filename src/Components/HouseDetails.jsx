@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from "react";
 import {
   MapPin,
@@ -11,30 +12,49 @@ import {
   ChevronRight,
   CalendarDays,
   UserRound,
-  Link,
 } from "lucide-react";
 import API from "../services/api";
 import { useNavigate } from "react-router-dom";
 
-const BACKEND_URL = "http://localhost:5000";
+// Render backend URL
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL ||
+  "https://roadtohome-api.onrender.com/api";
 
+const BACKEND_URL = API_BASE_URL.replace(/\/api\/?$/, "");
+
+const FALLBACK_IMAGE = "/Homes/home1.jpg";
+
+// Convert backend image path into complete URL
 const getImageUrl = (image) => {
-  if (!image) return "/Homes/home1.jpg";
+  if (!image) return FALLBACK_IMAGE;
 
-  const path =
+  let path =
     typeof image === "string"
       ? image
-      : image.url || image.path;
+      : image.url || image.path || "";
 
-  if (!path) return "/Homes/home1.jpg";
+  if (typeof path !== "string" || !path.trim()) {
+    return FALLBACK_IMAGE;
+  }
 
-  if (path.startsWith("http")) return path;
+  path = path.trim();
 
-  return `${BACKEND_URL}${path.startsWith("/") ? "" : "/"}${path}`;
+  // Replace old localhost image URLs with Render URL
+  if (/^https?:\/\//i.test(path)) {
+    return path.replace(
+      /^https?:\/\/(localhost|127\.0\.0\.1):5000/i,
+      BACKEND_URL
+    );
+  }
+
+  return `${BACKEND_URL}/${path.replace(/^\/+/, "")}`;
 };
 
 const HouseDetails = ({ elem, onClose, property }) => {
   const navigate = useNavigate();
+
+  const selectedProperty = elem || property;
 
   const [activeImage, setActiveImage] = useState(0);
   const [activeTab, setActiveTab] = useState("Overview");
@@ -64,7 +84,7 @@ const HouseDetails = ({ elem, onClose, property }) => {
     message: "",
   });
 
-  // Reset details when selected property changes
+  // Reset when property changes
   useEffect(() => {
     setActiveImage(0);
     setActiveTab("Overview");
@@ -75,7 +95,7 @@ const HouseDetails = ({ elem, onClose, property }) => {
     setMessageSuccess("");
     setMessageError("");
     setIsFavorite(false);
-  }, [elem?._id]);
+  }, [selectedProperty?._id]);
 
   // Get logged-in user
   useEffect(() => {
@@ -100,16 +120,24 @@ const HouseDetails = ({ elem, onClose, property }) => {
     }
   }, []);
 
-  if (!elem) return null;
+  if (!selectedProperty) return null;
 
-  // Multiple property images
+  const elem = selectedProperty;
+
+  // Property images
   const images =
-    elem.images?.length > 0
+    Array.isArray(elem.images) && elem.images.length > 0
       ? elem.images
-      : ["/Homes/home1.jpg"];
+      : [FALLBACK_IMAGE];
 
-  const ownerId = elem.owner?._id || elem.owner;
-  const userId = currentUser?._id || currentUser?.id;
+  const ownerId =
+    elem.owner?._id ||
+    elem.owner?.id ||
+    elem.owner;
+
+  const userId =
+    currentUser?._id ||
+    currentUser?.id;
 
   const isOwner =
     ownerId &&
@@ -131,6 +159,8 @@ const HouseDetails = ({ elem, onClose, property }) => {
     elem.price || 0
   ).toLocaleString("en-IN");
 
+  const propertyId = elem._id || elem.id;
+
   // Previous image
   const previousImage = () => {
     setActiveImage((prev) =>
@@ -145,7 +175,7 @@ const HouseDetails = ({ elem, onClose, property }) => {
     );
   };
 
-  // Booking form input handler
+  // Booking input handler
   const updateBookingData = (e) => {
     const { name, value } = e.target;
 
@@ -153,9 +183,18 @@ const HouseDetails = ({ elem, onClose, property }) => {
       ...prev,
       [name]: value,
     }));
+
+    // Clear checkout if check-in date changes
+    if (name === "checkIn") {
+      setBookingData((prev) => ({
+        ...prev,
+        checkIn: value,
+        checkOut: "",
+      }));
+    }
   };
 
-  // Send message to property owner
+  // Send message to owner
   const sendMessage = async (e) => {
     e.preventDefault();
 
@@ -181,12 +220,13 @@ const HouseDetails = ({ elem, onClose, property }) => {
       setMessageLoading(true);
 
       const response = await API.post("/messages/send", {
-        propertyId: elem._id,
+        propertyId,
         text: message.trim(),
       });
 
       setMessageSuccess(
-        response.data.message || "Message sent successfully!"
+        response.data?.message ||
+          "Message sent successfully!"
       );
 
       setMessage("");
@@ -222,6 +262,11 @@ const HouseDetails = ({ elem, onClose, property }) => {
       return;
     }
 
+    if (!propertyId) {
+      setBookingError("Property ID not found.");
+      return;
+    }
+
     if (
       !bookingData.guestName.trim() ||
       !bookingData.email.trim() ||
@@ -252,7 +297,7 @@ const HouseDetails = ({ elem, onClose, property }) => {
       setBookingLoading(true);
 
       const response = await API.post("/bookings", {
-        propertyId: elem._id,
+        propertyId,
         guestName: bookingData.guestName.trim(),
         email: bookingData.email.trim(),
         phone: bookingData.phone.trim(),
@@ -263,7 +308,7 @@ const HouseDetails = ({ elem, onClose, property }) => {
       });
 
       setBookingSuccess(
-        response.data.message ||
+        response.data?.message ||
           "Booking request submitted successfully!"
       );
 
@@ -314,26 +359,23 @@ const HouseDetails = ({ elem, onClose, property }) => {
 
       <div className="p-4 sm:p-6">
 
-        {/* MULTIPLE IMAGE GALLERY */}
+        {/* IMAGE GALLERY */}
         <div className="mt-2">
-
-          {/* Main Image */}
           <div className="group relative overflow-hidden rounded-2xl">
             <img
               src={getImageUrl(images[activeImage])}
-              alt={elem.name}
+              alt={elem.name || "Property"}
               onError={(e) => {
-                e.currentTarget.src = "/Homes/home1.jpg";
+                e.currentTarget.onerror = null;
+                e.currentTarget.src = FALLBACK_IMAGE;
               }}
               className="h-60 w-full object-cover transition-all duration-500 sm:h-75"
             />
 
-            {/* Listing Type */}
             <span className="absolute left-4 top-4 rounded-full bg-orange-500 px-4 py-2 text-xs font-bold text-white shadow">
               {elem.listingType}
             </span>
 
-            {/* Favorite Button */}
             <button
               type="button"
               onClick={() => setIsFavorite((prev) => !prev)}
@@ -349,7 +391,6 @@ const HouseDetails = ({ elem, onClose, property }) => {
               />
             </button>
 
-            {/* Previous Image */}
             {images.length > 1 && (
               <>
                 <button
@@ -360,7 +401,6 @@ const HouseDetails = ({ elem, onClose, property }) => {
                   <ChevronLeft size={22} />
                 </button>
 
-                {/* Next Image */}
                 <button
                   type="button"
                   onClick={nextImage}
@@ -371,13 +411,12 @@ const HouseDetails = ({ elem, onClose, property }) => {
               </>
             )}
 
-            {/* Image Counter */}
             <span className="absolute bottom-4 right-4 rounded-full bg-black/60 px-4 py-2 text-sm text-white">
               {activeImage + 1} / {images.length}
             </span>
           </div>
 
-          {/* Thumbnail Images */}
+          {/* THUMBNAILS */}
           {images.length > 1 && (
             <div className="mt-4 grid grid-cols-4 gap-3 sm:grid-cols-5">
               {images.map((image, index) => (
@@ -393,9 +432,10 @@ const HouseDetails = ({ elem, onClose, property }) => {
                 >
                   <img
                     src={getImageUrl(image)}
-                    alt={`${elem.name} ${index + 1}`}
+                    alt={`${elem.name || "Property"} ${index + 1}`}
                     onError={(e) => {
-                      e.currentTarget.src = "/Homes/home1.jpg";
+                      e.currentTarget.onerror = null;
+                      e.currentTarget.src = FALLBACK_IMAGE;
                     }}
                     className="h-16 w-full object-cover sm:h-20"
                   />
@@ -407,11 +447,10 @@ const HouseDetails = ({ elem, onClose, property }) => {
 
         {/* PROPERTY INFORMATION */}
         <div className="mt-7">
-
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <h2 className="text-2xl font-bold text-gray-900">
-                {elem.name}
+                {elem.name || "Untitled Property"}
               </h2>
 
               <p className="mt-2 flex items-center gap-2 text-sm text-gray-500">
@@ -421,13 +460,12 @@ const HouseDetails = ({ elem, onClose, property }) => {
             </div>
 
             <span className="rounded-lg bg-orange-50 px-4 py-2 text-sm font-bold text-orange-600">
-              {elem.propertyType}
+              {elem.propertyType || "Property"}
             </span>
           </div>
 
           <p className="mt-5 text-3xl font-bold text-orange-600">
             ₹{formattedPrice}
-
             {elem.priceType && (
               <span className="text-sm font-medium text-gray-500">
                 {" "}/ {elem.priceType}
@@ -435,9 +473,8 @@ const HouseDetails = ({ elem, onClose, property }) => {
             )}
           </p>
 
-          {/* PROPERTY FEATURES */}
+          {/* FEATURES */}
           <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
-
             <div className="rounded-xl bg-gray-50 p-4">
               <BedDouble className="mb-2 text-orange-500" size={23} />
               <p className="text-lg font-bold text-gray-900">
@@ -457,18 +494,16 @@ const HouseDetails = ({ elem, onClose, property }) => {
             <div className="rounded-xl bg-gray-50 p-4">
               <Maximize className="mb-2 text-orange-500" size={23} />
               <p className="text-lg font-bold text-gray-900">
-                {elem.area?.value ?? 0}
+                {elem.area?.value ?? elem.area ?? 0}
               </p>
               <p className="text-sm text-gray-500">
                 {elem.area?.unit || "Area"}
               </p>
             </div>
-
           </div>
 
-          {/* PROPERTY TABS */}
+          {/* TABS */}
           <div className="mt-8 flex gap-6 overflow-x-auto border-b border-gray-200">
-
             {["Overview", "Amenities", "About"].map((tab) => (
               <button
                 type="button"
@@ -483,18 +518,15 @@ const HouseDetails = ({ elem, onClose, property }) => {
                 {tab}
               </button>
             ))}
-
           </div>
 
           {/* TAB CONTENT */}
           <div className="min-h-[120px] py-5">
-
             {activeTab === "Overview" && (
               <div>
                 <h3 className="mb-3 text-lg font-bold text-gray-900">
                   Property Description
                 </h3>
-
                 <p className="leading-7 text-gray-600">
                   {elem.description ||
                     "No description available for this property."}
@@ -566,13 +598,11 @@ const HouseDetails = ({ elem, onClose, property }) => {
                 </div>
               </div>
             )}
-
           </div>
         </div>
 
         {/* BOOKING SECTION */}
         <div className="mt-5 rounded-2xl border border-orange-100 bg-orange-50 p-5 sm:p-6">
-
           <div className="flex items-center gap-3">
             <div className="rounded-xl bg-white p-3 text-orange-500">
               <CalendarDays size={24} />
@@ -582,7 +612,6 @@ const HouseDetails = ({ elem, onClose, property }) => {
               <h3 className="text-lg font-bold text-gray-900">
                 Interested in this property?
               </h3>
-
               <p className="mt-1 text-sm text-gray-600">
                 Submit a booking request to the property owner.
               </p>
@@ -616,12 +645,10 @@ const HouseDetails = ({ elem, onClose, property }) => {
               onSubmit={handleBookingSubmit}
               className="mt-5 space-y-4"
             >
-
               <div>
                 <label className="mb-2 block text-sm font-semibold">
                   Full Name
                 </label>
-
                 <input
                   type="text"
                   name="guestName"
@@ -637,7 +664,6 @@ const HouseDetails = ({ elem, onClose, property }) => {
                 <label className="mb-2 block text-sm font-semibold">
                   Email Address
                 </label>
-
                 <input
                   type="email"
                   name="email"
@@ -653,7 +679,6 @@ const HouseDetails = ({ elem, onClose, property }) => {
                 <label className="mb-2 block text-sm font-semibold">
                   Phone Number
                 </label>
-
                 <input
                   type="tel"
                   name="phone"
@@ -668,12 +693,10 @@ const HouseDetails = ({ elem, onClose, property }) => {
               {/* RENT DATES */}
               {isRent && (
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-
                   <div>
                     <label className="mb-2 block text-sm font-semibold">
                       Check In
                     </label>
-
                     <input
                       type="date"
                       name="checkIn"
@@ -689,13 +712,18 @@ const HouseDetails = ({ elem, onClose, property }) => {
                     <label className="mb-2 block text-sm font-semibold">
                       Check Out
                     </label>
-
                     <input
                       type="date"
                       name="checkOut"
                       min={
-                        bookingData.checkIn ||
-                        new Date().toISOString().split("T")[0]
+                        bookingData.checkIn
+                          ? new Date(
+                              new Date(bookingData.checkIn).getTime() +
+                                86400000
+                            )
+                              .toISOString()
+                              .split("T")[0]
+                          : new Date().toISOString().split("T")[0]
                       }
                       value={bookingData.checkOut}
                       onChange={updateBookingData}
@@ -703,7 +731,6 @@ const HouseDetails = ({ elem, onClose, property }) => {
                       className="w-full rounded-xl border border-gray-200 bg-white p-3"
                     />
                   </div>
-
                 </div>
               )}
 
@@ -711,7 +738,6 @@ const HouseDetails = ({ elem, onClose, property }) => {
                 <label className="mb-2 block text-sm font-semibold">
                   Number of Guests
                 </label>
-
                 <input
                   type="number"
                   name="guests"
@@ -727,7 +753,6 @@ const HouseDetails = ({ elem, onClose, property }) => {
                 <label className="mb-2 block text-sm font-semibold">
                   Additional Message
                 </label>
-
                 <textarea
                   name="message"
                   rows="3"
@@ -765,15 +790,13 @@ const HouseDetails = ({ elem, onClose, property }) => {
                   ? "Submitting Request..."
                   : "Submit Booking Request"}
               </button>
-
             </form>
           )}
         </div>
 
-        {/* MESSAGE OWNER SECTION */}
+        {/* MESSAGE OWNER */}
         {!isOwner && (
           <div className="mt-6 rounded-2xl border border-gray-200 p-5 sm:p-6">
-
             <div className="mb-4 flex items-center gap-3">
               <div className="rounded-xl bg-orange-50 p-3 text-orange-500">
                 <UserRound size={23} />
@@ -783,7 +806,6 @@ const HouseDetails = ({ elem, onClose, property }) => {
                 <h3 className="text-lg font-bold text-gray-900">
                   Contact Property Owner
                 </h3>
-
                 <p className="text-sm text-gray-500">
                   Have questions? Send an inquiry.
                 </p>
@@ -791,7 +813,6 @@ const HouseDetails = ({ elem, onClose, property }) => {
             </div>
 
             <form onSubmit={sendMessage}>
-
               <textarea
                 rows="4"
                 value={message}
@@ -820,15 +841,14 @@ const HouseDetails = ({ elem, onClose, property }) => {
                 <Send size={18} />
                 {messageLoading ? "Sending..." : "Send Message"}
               </button>
-
             </form>
           </div>
         )}
 
+        {/* FULL PROPERTY PAGE */}
         <button
+          type="button"
           onClick={() => {
-            const propertyId = elem?._id || elem?.id;
-
             if (!propertyId) {
               console.error("Property ID not found:", elem);
               return;
@@ -836,7 +856,7 @@ const HouseDetails = ({ elem, onClose, property }) => {
 
             navigate(`/properties/${propertyId}`);
           }}
-          className="w-full rounded-xl bg-orange-500 px-5 py-3 text-white font-semibold hover:bg-orange-600 mt-3"
+          className="mt-3 w-full rounded-xl bg-orange-500 px-5 py-3 font-semibold text-white hover:bg-orange-600"
         >
           Property Details
         </button>
