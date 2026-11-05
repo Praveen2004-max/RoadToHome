@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -17,7 +16,7 @@ import {
   deleteProperty,
 } from "../../services/propertyService";
 
-// Render backend URL
+// Backend URL
 const API_BASE_URL =
   import.meta.env.VITE_API_URL ||
   "https://roadtohome-api.onrender.com/api";
@@ -26,11 +25,38 @@ const BACKEND_URL = API_BASE_URL.replace(/\/api\/?$/, "");
 
 const FALLBACK_IMAGE = "/Images/placeholder.jpg";
 
-const statusStyles = {
-  Available: "bg-emerald-50 text-emerald-700",
-  Sold: "bg-blue-50 text-blue-700",
-  Rented: "bg-purple-50 text-purple-700",
-  Pending: "bg-amber-50 text-amber-700",
+// Convert image path to a valid deployed URL
+const getImageUrl = (images) => {
+  const image = Array.isArray(images) ? images[0] : images;
+
+  if (!image) return FALLBACK_IMAGE;
+
+  let path =
+    typeof image === "string"
+      ? image
+      : image.url || image.path || "";
+
+  if (typeof path !== "string" || !path.trim()) {
+    return FALLBACK_IMAGE;
+  }
+
+  path = path.trim();
+
+  // Replace old localhost URLs with deployed backend URL
+  if (/^https?:\/\/(localhost|127\.0\.0\.1):5000/i.test(path)) {
+    path = path.replace(
+      /^https?:\/\/(localhost|127\.0\.0\.1):5000/i,
+      BACKEND_URL
+    );
+  }
+
+  // Keep other absolute URLs unchanged
+  if (/^https?:\/\//i.test(path)) {
+    return path;
+  }
+
+  // Convert relative paths such as /uploads/image.jpg
+  return `${BACKEND_URL}/${path.replace(/^\/+/, "")}`;
 };
 
 // Get location text
@@ -52,35 +78,6 @@ const getLocation = (location) => {
   );
 };
 
-// Get image URL
-const getImageUrl = (images) => {
-  const image = Array.isArray(images)
-    ? images[0]
-    : images;
-
-  if (!image) return FALLBACK_IMAGE;
-
-  let path =
-    typeof image === "string"
-      ? image
-      : image.url || image.path || "";
-
-  if (typeof path !== "string" || !path.trim()) {
-    return FALLBACK_IMAGE;
-  }
-
-  path = path.trim();
-
-  if (/^https?:\/\//i.test(path)) {
-    return path.replace(
-      /^https?:\/\/(localhost|127\.0\.0\.1):5000/i,
-      BACKEND_URL
-    );
-  }
-
-  return `${BACKEND_URL}/${path.replace(/^\/+/, "")}`;
-};
-
 // Format price
 const formatPrice = (price) => {
   if (price === undefined || price === null || price === "") {
@@ -96,6 +93,13 @@ const formatPrice = (price) => {
     currency: "INR",
     maximumFractionDigits: 0,
   }).format(amount);
+};
+
+const statusStyles = {
+  Available: "bg-emerald-50 text-emerald-700",
+  Sold: "bg-blue-50 text-blue-700",
+  Rented: "bg-purple-50 text-purple-700",
+  Pending: "bg-amber-50 text-amber-700",
 };
 
 export default function Properties() {
@@ -117,7 +121,6 @@ export default function Properties() {
 
       const response = await getAllProperties();
 
-      // Handle different API response formats
       const data = Array.isArray(response)
         ? response
         : response?.properties ||
@@ -185,7 +188,6 @@ export default function Properties() {
     const propertyName = property.name || "";
     const propertyLocation = getLocation(property.location);
     const listingType = property.listingType || "";
-
     const searchText = search.toLowerCase();
 
     const matchesSearch =
@@ -247,8 +249,7 @@ export default function Properties() {
 
   return (
     <div className="min-h-screen w-full bg-slate-50 p-4 sm:p-6 lg:p-8">
-
-      {/* HEADER */}
+      {/* Header */}
       <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="mb-1 text-sm font-medium text-emerald-700">
@@ -274,7 +275,7 @@ export default function Properties() {
         </button>
       </div>
 
-      {/* SUMMARY CARDS */}
+      {/* Summary Cards */}
       <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {stats.map((item) => {
           const Icon = item.icon;
@@ -304,7 +305,7 @@ export default function Properties() {
         })}
       </div>
 
-      {/* SEARCH AND FILTERS */}
+      {/* Search and Filters */}
       <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
           <div className="relative flex-1">
@@ -360,7 +361,7 @@ export default function Properties() {
         </div>
       </div>
 
-      {/* LISTING HEADING */}
+      {/* Listing Heading */}
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-lg font-bold text-slate-900">
           All Listings
@@ -371,7 +372,7 @@ export default function Properties() {
         </p>
       </div>
 
-      {/* LOADING */}
+      {/* Loading */}
       {loading && (
         <div className="rounded-2xl border border-slate-200 bg-white py-16 text-center">
           <RefreshCw
@@ -385,7 +386,7 @@ export default function Properties() {
         </div>
       )}
 
-      {/* ERROR */}
+      {/* Error */}
       {!loading && error && (
         <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
           <p className="text-red-700">{error}</p>
@@ -400,7 +401,7 @@ export default function Properties() {
         </div>
       )}
 
-      {/* EMPTY STATE */}
+      {/* Empty State */}
       {!loading && !error && filteredProperties.length === 0 && (
         <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-16 text-center">
           <Home
@@ -426,7 +427,7 @@ export default function Properties() {
         </div>
       )}
 
-      {/* PROPERTY CARDS */}
+      {/* Property Cards */}
       {!loading && !error && filteredProperties.length > 0 && (
         <div className="grid grid-cols-1 gap-5 md:grid-cols-2 2xl:grid-cols-3">
           {filteredProperties.map((property) => {
@@ -438,7 +439,7 @@ export default function Properties() {
                 key={propertyId}
                 className="group overflow-hidden rounded-2xl border border-slate-200 bg-white transition duration-300 hover:-translate-y-1 hover:shadow-xl"
               >
-                {/* IMAGE */}
+                {/* Image */}
                 <div className="relative h-52 overflow-hidden bg-slate-100">
                   <img
                     src={getImageUrl(property.images || property.image)}
@@ -464,7 +465,7 @@ export default function Properties() {
                   </span>
                 </div>
 
-                {/* DETAILS */}
+                {/* Details */}
                 <div className="p-5">
                   <div className="mb-3 flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -514,7 +515,7 @@ export default function Properties() {
                     </div>
                   </div>
 
-                  {/* ACTIONS */}
+                  {/* Actions */}
                   <div className="flex gap-3 border-t border-slate-100 pt-4">
                     <button
                       type="button"
@@ -535,7 +536,10 @@ export default function Properties() {
                       className="flex items-center justify-center rounded-xl border border-red-100 px-3 text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {deletingId === propertyId ? (
-                        <RefreshCw size={17} className="animate-spin" />
+                        <RefreshCw
+                          size={17}
+                          className="animate-spin"
+                        />
                       ) : (
                         <Trash2 size={17} />
                       )}
