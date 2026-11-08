@@ -4,11 +4,28 @@ import { Link } from "react-router-dom";
 import API from "../services/api";
 
 const getImageUrl = (image) => {
-  if (!image) return "https://placehold.co/900x600?text=Location";
+  if (!image) {
+    return "https://placehold.co/900x600?text=Location";
+  }
 
-  if (image.startsWith("http")) return image;
+  // Cloudinary URL
+  if (
+    image.startsWith("https://res.cloudinary.com/") ||
+    image.startsWith("http://res.cloudinary.com/")
+  ) {
+    return image;
+  }
 
-  return `http://localhost:5000${image.startsWith("/") ? "" : "/"}${image}`;
+  // Other external image URLs
+  if (image.startsWith("http://") || image.startsWith("https://")) {
+    return image;
+  }
+
+  // Legacy local images
+  const backendURL = import.meta.env.VITE_API_URL?.replace("/api", "") ||
+    "http://localhost:5000";
+
+  return `${backendURL}/${image.replace(/^\/+/, "")}`;
 };
 
 const PopularLocations = () => {
