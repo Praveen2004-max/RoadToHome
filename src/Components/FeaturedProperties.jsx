@@ -1,6 +1,6 @@
 
 import React, { useCallback, useEffect, useState } from "react";
-import API from "../../services/api";
+import API from "../services/api";
 import {
   Star,
   Search,

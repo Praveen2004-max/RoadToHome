@@ -122,7 +122,7 @@ const HouseDetails = ({ elem, onClose, property }) => {
 
   if (!selectedProperty) return null;
 
-  const elem = selectedProperty;
+  elem = selectedProperty;
 
   // Property images
   const images =
