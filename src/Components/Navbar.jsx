@@ -102,7 +102,7 @@ const Navbar = () => {
 
   const dashboardPath = isAdmin
     ? "/dashboard"
-    : "/user-dashboard";
+    : "/dashboard";
 
   const dashboardLabel = isAdmin
     ? "Admin Dashboard"

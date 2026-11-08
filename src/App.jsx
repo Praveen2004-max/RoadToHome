@@ -208,7 +208,7 @@ const App = () => {
         <Route
           path="/edit-property/:id"
           element={
-              <EditProperty />
+            <EditProperty />
           }
         />
 
