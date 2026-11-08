@@ -1,3 +1,4 @@
+
 const express = require("express");
 const router = express.Router();
 
@@ -11,13 +12,23 @@ const {
 } = require("../Controllers/locationController");
 
 const upload = require("../middleware/uploads");
-const { protect, adminOnly } = require("../middleware/authMiddleware");
+const {
+  protect,
+  adminOnly,
+} = require("../middleware/authMiddleware");
 
-// Public route
+// ==========================================
+// Public Routes
+// ==========================================
+
 router.get("/", getPublicLocations);
 
-// Admin routes
+// ==========================================
+// Admin Routes
+// ==========================================
+
 router.get("/admin/all", protect, adminOnly, getAllLocations);
+
 router.get("/admin/:id", protect, adminOnly, getLocationById);
 
 router.post(
@@ -36,6 +47,11 @@ router.put(
   updateLocation
 );
 
-router.delete("/:id", protect, adminOnly, deleteLocation);
+router.delete(
+  "/:id",
+  protect,
+  adminOnly,
+  deleteLocation
+);
 
 module.exports = router;

@@ -1,6 +1,5 @@
 
 const mongoose = require("mongoose");
-const { Readable } = require("stream");
 
 const Location = require("../Modules/location");
 const Property = require("../Modules/property");
@@ -9,33 +8,24 @@ const User = require("../Modules/user");
 const cloudinary = require("../Config/cloudinary");
 
 // ==========================================
-// Cloudinary Upload Helper
+// Cloudinary Delete Helper
 // ==========================================
 
-const uploadToCloudinary = (file) => {
-  return new Promise((resolve, reject) => {
-    if (!file || !file.buffer) {
-      return reject(new Error("Image buffer not found. Use multer memoryStorage."));
+const deleteCloudinaryImage = async (publicId) => {
+  if (!publicId) return;
+
+  try {
+    const result = await cloudinary.uploader.destroy(publicId, {
+      resource_type: "image",
+      invalidate: true,
+    });
+
+    if (result.result !== "ok" && result.result !== "not found") {
+      console.warn("Cloudinary delete result:", result);
     }
-
-    const uploadStream = cloudinary.uploader.upload_stream(
-      {
-        folder: "gharfinder/locations",
-        resource_type: "image",
-        transformation: [
-          { width: 1200, height: 800, crop: "limit" },
-          { quality: "auto" },
-          { fetch_format: "auto" },
-        ],
-      },
-      (error, result) => {
-        if (error) return reject(error);
-        resolve(result);
-      }
-    );
-
-    Readable.from(file.buffer).pipe(uploadStream);
-  });
+  } catch (error) {
+    console.error("Cloudinary Delete Error:", error.message);
+  }
 };
 
 // ==========================================
@@ -69,12 +59,14 @@ const notifyAllUsers = async ({
 };
 
 // ==========================================
-// Public: Active Locations
+// Public: Get Active Locations
 // ==========================================
 
 const getPublicLocations = async (req, res) => {
   try {
-    const locations = await Location.find({ isActive: true })
+    const locations = await Location.find({
+      isActive: true,
+    })
       .sort({ displayOrder: 1, city: 1 })
       .lean();
 
@@ -125,9 +117,11 @@ const getPublicLocations = async (req, res) => {
       locations: result,
     });
   } catch (error) {
+    console.error("Get Public Locations Error:", error);
+
     return res.status(500).json({
       success: false,
-      message: error.message,
+      message: "Unable to load locations",
     });
   }
 };
@@ -203,21 +197,22 @@ const createLocation = async (req, res) => {
     } = req.body;
 
     if (!city?.trim() || !state?.trim() || !description?.trim()) {
+      if (req.file?.public_id) {
+        await deleteCloudinaryImage(req.file.public_id);
+      }
+
       return res.status(400).json({
         success: false,
         message: "City, state and description are required",
       });
     }
 
-    if (!req.file) {
+    if (!req.file?.path || !req.file?.public_id) {
       return res.status(400).json({
         success: false,
         message: "Location image is required",
       });
     }
-
-    // Upload image to Cloudinary
-    const uploadedImage = await uploadToCloudinary(req.file);
 
     const location = await Location.create({
       city: city.trim(),
@@ -225,15 +220,16 @@ const createLocation = async (req, res) => {
       country: country?.trim() || "India",
       description: description.trim(),
 
-      // Cloudinary URL
-      image: uploadedImage.secure_url,
+      // Already uploaded by Multer Cloudinary storage
+      image: req.file.path,
+      imagePublicId: req.file.public_id,
 
       displayOrder: Number(displayOrder) || 0,
     });
 
     await notifyAllUsers({
       title: "New Location Available!",
-      message: `${location.city}, ${location.state} is now available on GharFinder. Explore properties in this location.`,
+      message: `${location.city}, ${location.state} is now available on RoadToHome. Explore properties in this location.`,
       link: "/properties",
     });
 
@@ -243,6 +239,13 @@ const createLocation = async (req, res) => {
       location,
     });
   } catch (error) {
+    // Remove newly uploaded image if database creation fails
+    if (req.file?.public_id) {
+      await deleteCloudinaryImage(req.file.public_id);
+    }
+
+    console.error("Create Location Error:", error);
+
     if (error.code === 11000) {
       return res.status(409).json({
         success: false,
@@ -262,8 +265,14 @@ const createLocation = async (req, res) => {
 // ==========================================
 
 const updateLocation = async (req, res) => {
+  let newImageUploaded = false;
+
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
+      if (req.file?.public_id) {
+        await deleteCloudinaryImage(req.file.public_id);
+      }
+
       return res.status(400).json({
         success: false,
         message: "Invalid location ID",
@@ -273,6 +282,10 @@ const updateLocation = async (req, res) => {
     const location = await Location.findById(req.params.id);
 
     if (!location) {
+      if (req.file?.public_id) {
+        await deleteCloudinaryImage(req.file.public_id);
+      }
+
       return res.status(404).json({
         success: false,
         message: "Location not found",
@@ -290,16 +303,36 @@ const updateLocation = async (req, res) => {
       isActive,
     } = req.body;
 
-    if (city !== undefined) location.city = city.trim();
-    if (state !== undefined) location.state = state.trim();
-    if (country !== undefined) location.country = country.trim();
+    if (city !== undefined) {
+      if (!city.trim()) {
+        throw new Error("City cannot be empty");
+      }
+      location.city = city.trim();
+    }
+
+    if (state !== undefined) {
+      if (!state.trim()) {
+        throw new Error("State cannot be empty");
+      }
+      location.state = state.trim();
+    }
+
+    if (country !== undefined) {
+      location.country = country.trim();
+    }
 
     if (description !== undefined) {
       location.description = description.trim();
     }
 
     if (displayOrder !== undefined) {
-      location.displayOrder = Number(displayOrder) || 0;
+      const order = Number(displayOrder);
+
+      if (!Number.isFinite(order)) {
+        throw new Error("Invalid display order");
+      }
+
+      location.displayOrder = order;
     }
 
     if (isActive !== undefined) {
@@ -307,14 +340,31 @@ const updateLocation = async (req, res) => {
         isActive === true || isActive === "true";
     }
 
-    // Upload new image only when provided
-    if (req.file) {
-      const uploadedImage = await uploadToCloudinary(req.file);
+    // Save old public ID before replacing the image
+    const oldImagePublicId = location.imagePublicId;
 
-      location.image = uploadedImage.secure_url;
+    // New image is already uploaded by Multer
+    if (req.file) {
+      if (!req.file.path || !req.file.public_id) {
+        throw new Error("Cloudinary image upload failed");
+      }
+
+      newImageUploaded = true;
+
+      location.image = req.file.path;
+      location.imagePublicId = req.file.public_id;
     }
 
     await location.save();
+
+    // Delete old image only after successful database save
+    if (
+      req.file &&
+      oldImagePublicId &&
+      oldImagePublicId !== req.file.public_id
+    ) {
+      await deleteCloudinaryImage(oldImagePublicId);
+    }
 
     if (previousIsActive !== location.isActive) {
       await notifyAllUsers({
@@ -323,7 +373,7 @@ const updateLocation = async (req, res) => {
           : "Location Unavailable",
 
         message: location.isActive
-          ? `${location.city}, ${location.state} is now available on GharFinder.`
+          ? `${location.city}, ${location.state} is now available on RoadToHome.`
           : `${location.city}, ${location.state} is currently unavailable.`,
 
         link: "/properties",
@@ -336,6 +386,13 @@ const updateLocation = async (req, res) => {
       location,
     });
   } catch (error) {
+    // Clean up newly uploaded image if update fails
+    if (newImageUploaded && req.file?.public_id) {
+      await deleteCloudinaryImage(req.file.public_id);
+    }
+
+    console.error("Update Location Error:", error);
+
     if (error.code === 11000) {
       return res.status(409).json({
         success: false,
@@ -374,9 +431,12 @@ const deleteLocation = async (req, res) => {
 
     await Location.findByIdAndDelete(req.params.id);
 
+    // Delete Cloudinary image
+    await deleteCloudinaryImage(location.imagePublicId);
+
     await notifyAllUsers({
       title: "Location Removed",
-      message: `${location.city}, ${location.state} is no longer available on GharFinder.`,
+      message: `${location.city}, ${location.state} is no longer available on RoadToHome.`,
       link: "/properties",
     });
 
@@ -385,6 +445,8 @@ const deleteLocation = async (req, res) => {
       message: "Location deleted successfully",
     });
   } catch (error) {
+    console.error("Delete Location Error:", error);
+
     return res.status(500).json({
       success: false,
       message: error.message,
