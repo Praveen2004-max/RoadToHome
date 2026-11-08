@@ -1,3 +1,4 @@
+
 import React, {
   useCallback,
   useEffect,
@@ -35,7 +36,7 @@ import {
 
 import API from "../services/api";
 
-// Production and local backend URL
+// Backend URL
 const BACKEND_URL = (
   import.meta.env.VITE_API_URL ||
   "https://roadtohome-api.onrender.com/api"
@@ -46,14 +47,14 @@ const getProfileImageUrl = (image) => {
   if (!image) return "";
 
   if (typeof image === "object") {
-    image = image.url || image.path || "";
+    image = image.url || image.secure_url || image.path || "";
   }
 
   if (!image) return "";
 
   if (/^https?:\/\//i.test(image)) {
     return image.replace(
-      /^https?:\/\/(localhost|127\.0\.0\.1):5000/i,
+      /^http:\/\/(localhost|127\.0\.0\.1):5000/i,
       BACKEND_URL
     );
   }
@@ -84,7 +85,7 @@ const Navbar = () => {
   const [notificationLoading, setNotificationLoading] = useState(false);
   const [notificationError, setNotificationError] = useState("");
 
-  // Image fallback
+  // Profile image fallback
   const [imageFailed, setImageFailed] = useState(false);
 
   // Refs
@@ -96,7 +97,16 @@ const Navbar = () => {
   const [showNavbar, setShowNavbar] = useState(true);
   const lastScrollY = useRef(0);
 
+  // Role-based dashboard
   const isAdmin = user?.role === "admin";
+
+  const dashboardPath = isAdmin
+    ? "/dashboard"
+    : "/user-dashboard";
+
+  const dashboardLabel = isAdmin
+    ? "Admin Dashboard"
+    : "User Dashboard";
 
   // Scroll listener
   useEffect(() => {
@@ -123,12 +133,12 @@ const Navbar = () => {
     };
   }, []);
 
-  // Token
+  // Get token
   const getToken = () => localStorage.getItem("token");
 
   // Fetch notifications
   const fetchNotifications = useCallback(async () => {
-    if (!getToken()) {
+    if (!localStorage.getItem("token")) {
       setNotifications([]);
       setUnreadCount(0);
       return;
@@ -203,7 +213,7 @@ const Navbar = () => {
     };
   }, [fetchNotifications]);
 
-  // Close dropdown outside click
+  // Close dropdown on outside click
   useEffect(() => {
     const handleOutsideClick = (event) => {
       const clickedInsideDesktop =
@@ -257,6 +267,8 @@ const Navbar = () => {
 
   // Mark all notifications as read
   const markAllAsRead = async () => {
+    if (unreadCount === 0) return;
+
     try {
       await API.patch("/notifications/read-all");
 
@@ -379,7 +391,7 @@ const Navbar = () => {
     );
   };
 
-  // Notification dropdown
+  // Notification panel
   const NotificationPanel = () => (
     <div className="absolute right-0 top-full z-[9999] mt-3 w-[min(360px,calc(100vw-24px))] overflow-hidden rounded-2xl border border-gray-200 bg-white text-gray-800 shadow-2xl">
 
@@ -599,26 +611,26 @@ const Navbar = () => {
             My Properties
           </Link>
 
-          {isAdmin && (
-            <>
-              <Link
-                to="/dashboard"
-                onClick={() => setProfileMenuOpen(false)}
-                className="flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-orange-50 hover:text-orange-600"
-              >
-                <LayoutDashboard size={17} />
-                Admin Dashboard
-              </Link>
+          {/* Role-based Dashboard */}
+          <Link
+            to={dashboardPath}
+            onClick={() => setProfileMenuOpen(false)}
+            className="flex items-center gap-3 px-4 py-3 text-sm text-gray-700 transition hover:bg-orange-50 hover:text-orange-600"
+          >
+            <LayoutDashboard size={17} />
+            {dashboardLabel}
+          </Link>
 
-              <Link
-                to="/dashboard/Settings"
-                onClick={() => setProfileMenuOpen(false)}
-                className="flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-orange-50 hover:text-orange-600"
-              >
-                <Settings size={17} />
-                Settings
-              </Link>
-            </>
+          {/* Admin-only Settings */}
+          {isAdmin && (
+            <Link
+              to="/dashboard/Settings"
+              onClick={() => setProfileMenuOpen(false)}
+              className="flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-orange-50 hover:text-orange-600"
+            >
+              <Settings size={17} />
+              Settings
+            </Link>
           )}
 
           <button
@@ -674,9 +686,10 @@ const Navbar = () => {
               Contact
             </NavLink>
 
-            {isAdmin && (
+            {/* Admin and User Dashboard */}
+            {user && (
               <NavLink
-                to="/dashboard"
+                to={dashboardPath}
                 className={navLinkClass}
               >
                 <LayoutDashboard size={17} />
@@ -769,14 +782,15 @@ const Navbar = () => {
                 Contact
               </NavLink>
 
-              {isAdmin && (
+              {/* Role-based Dashboard */}
+              {user && (
                 <NavLink
-                  to="/dashboard"
+                  to={dashboardPath}
                   onClick={() => setIsOpen(false)}
                   className={navLinkClass}
                 >
                   <LayoutDashboard size={18} />
-                  Admin Dashboard
+                  {dashboardLabel}
                 </NavLink>
               )}
 
@@ -860,7 +874,7 @@ const Navbar = () => {
         )}
       </nav>
 
-      {/* Fixed navbar spacer */}
+      {/* Navbar spacer */}
       <div className="h-[68px] w-full" />
     </>
   );
