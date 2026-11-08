@@ -19,8 +19,8 @@ import {
   Maximize2,
 } from "lucide-react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { getSingleProperty } from "../services/propertyService";
-import WriteReview from "../components/WriteReview";
+import { getSingleProperty } from "../../services/propertyService";
+import WriteReview from "../../Components/WriteReview";
 
 const API_BASE_URL =
   import.meta.env.VITE_API_URL ||
