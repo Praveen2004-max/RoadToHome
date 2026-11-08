@@ -49,10 +49,6 @@ const storage = {
     file.stream.pipe(stream);
   },
 
-  // ==========================================
-  // Remove Uploaded File from Cloudinary
-  // ==========================================
-
   _removeFile(req, file, cb) {
     if (!file.public_id) {
       return cb(null);
@@ -70,7 +66,7 @@ const storage = {
 };
 
 // ==========================================
-// Image File Validation
+// Image Validation
 // ==========================================
 
 const fileFilter = (req, file, cb) => {
@@ -84,9 +80,7 @@ const fileFilter = (req, file, cb) => {
     return cb(null, true);
   }
 
-  return cb(
-    new Error("Only JPG, PNG and WEBP images are allowed")
-  );
+  cb(new Error("Only JPG, PNG and WEBP images are allowed"));
 };
 
 // ==========================================
@@ -96,7 +90,6 @@ const fileFilter = (req, file, cb) => {
 const upload = multer({
   storage,
   fileFilter,
-
   limits: {
     fileSize: 5 * 1024 * 1024,
     files: 10,
