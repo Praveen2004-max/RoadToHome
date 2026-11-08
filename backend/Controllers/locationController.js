@@ -1,16 +1,52 @@
 
 const mongoose = require("mongoose");
+const { Readable } = require("stream");
 
 const Location = require("../Modules/location");
 const Property = require("../Modules/property");
 const Notification = require("../Modules/Notification");
 const User = require("../Modules/user");
+const cloudinary = require("../Config/cloudinary");
+
+// ==========================================
+// Cloudinary Upload Helper
+// ==========================================
+
+const uploadToCloudinary = (file) => {
+  return new Promise((resolve, reject) => {
+    if (!file || !file.buffer) {
+      return reject(new Error("Image buffer not found. Use multer memoryStorage."));
+    }
+
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        folder: "gharfinder/locations",
+        resource_type: "image",
+        transformation: [
+          { width: 1200, height: 800, crop: "limit" },
+          { quality: "auto" },
+          { fetch_format: "auto" },
+        ],
+      },
+      (error, result) => {
+        if (error) return reject(error);
+        resolve(result);
+      }
+    );
+
+    Readable.from(file.buffer).pipe(uploadStream);
+  });
+};
 
 // ==========================================
 // Notification Helper
 // ==========================================
 
-const notifyAllUsers = async ({ title, message, link = "/properties" }) => {
+const notifyAllUsers = async ({
+  title,
+  message,
+  link = "/properties",
+}) => {
   try {
     const users = await User.find().select("_id").lean();
 
@@ -33,7 +69,7 @@ const notifyAllUsers = async ({ title, message, link = "/properties" }) => {
 };
 
 // ==========================================
-// Public: Active locations for homepage
+// Public: Active Locations
 // ==========================================
 
 const getPublicLocations = async (req, res) => {
@@ -97,7 +133,7 @@ const getPublicLocations = async (req, res) => {
 };
 
 // ==========================================
-// Admin: Get all locations
+// Admin: Get All Locations
 // ==========================================
 
 const getAllLocations = async (req, res) => {
@@ -119,7 +155,7 @@ const getAllLocations = async (req, res) => {
 };
 
 // ==========================================
-// Admin: Get single location
+// Admin: Get Single Location
 // ==========================================
 
 const getLocationById = async (req, res) => {
@@ -153,12 +189,18 @@ const getLocationById = async (req, res) => {
 };
 
 // ==========================================
-// Admin: Create location
+// Admin: Create Location
 // ==========================================
 
 const createLocation = async (req, res) => {
   try {
-    const { city, state, country, description, displayOrder } = req.body;
+    const {
+      city,
+      state,
+      country,
+      description,
+      displayOrder,
+    } = req.body;
 
     if (!city?.trim() || !state?.trim() || !description?.trim()) {
       return res.status(400).json({
@@ -174,16 +216,21 @@ const createLocation = async (req, res) => {
       });
     }
 
+    // Upload image to Cloudinary
+    const uploadedImage = await uploadToCloudinary(req.file);
+
     const location = await Location.create({
       city: city.trim(),
       state: state.trim(),
       country: country?.trim() || "India",
       description: description.trim(),
-      image: `/uploads/${req.file.filename}`,
+
+      // Cloudinary URL
+      image: uploadedImage.secure_url,
+
       displayOrder: Number(displayOrder) || 0,
     });
 
-    // Notify all registered users
     await notifyAllUsers({
       title: "New Location Available!",
       message: `${location.city}, ${location.state} is now available on GharFinder. Explore properties in this location.`,
@@ -211,7 +258,7 @@ const createLocation = async (req, res) => {
 };
 
 // ==========================================
-// Admin: Update location
+// Admin: Update Location
 // ==========================================
 
 const updateLocation = async (req, res) => {
@@ -246,6 +293,7 @@ const updateLocation = async (req, res) => {
     if (city !== undefined) location.city = city.trim();
     if (state !== undefined) location.state = state.trim();
     if (country !== undefined) location.country = country.trim();
+
     if (description !== undefined) {
       location.description = description.trim();
     }
@@ -255,16 +303,19 @@ const updateLocation = async (req, res) => {
     }
 
     if (isActive !== undefined) {
-      location.isActive = isActive === true || isActive === "true";
+      location.isActive =
+        isActive === true || isActive === "true";
     }
 
+    // Upload new image only when provided
     if (req.file) {
-      location.image = `/uploads/${req.file.filename}`;
+      const uploadedImage = await uploadToCloudinary(req.file);
+
+      location.image = uploadedImage.secure_url;
     }
 
     await location.save();
 
-    // Notify users only when active status changes
     if (previousIsActive !== location.isActive) {
       await notifyAllUsers({
         title: location.isActive
@@ -300,7 +351,7 @@ const updateLocation = async (req, res) => {
 };
 
 // ==========================================
-// Admin: Delete location
+// Admin: Delete Location
 // ==========================================
 
 const deleteLocation = async (req, res) => {
@@ -323,7 +374,6 @@ const deleteLocation = async (req, res) => {
 
     await Location.findByIdAndDelete(req.params.id);
 
-    // Notify all registered users
     await notifyAllUsers({
       title: "Location Removed",
       message: `${location.city}, ${location.state} is no longer available on GharFinder.`,
