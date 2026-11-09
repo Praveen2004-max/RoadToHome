@@ -9,6 +9,7 @@ const upload = require("../middleware/uploads");
 const {
   signUP,
   signIN,
+  socialSignIn,
   getMyProfile,
   updateMyProfile,
   getAllUsers,
@@ -33,6 +34,9 @@ router.post(
 
 // User Login
 router.post("/signIn", signIN);
+
+// Google and Apple Authentication
+router.post("/social-signIn", socialSignIn);
 
 // ========================================
 // USER PROFILE ROUTES

@@ -52,6 +52,24 @@ const userSchema = new mongoose.Schema({
       enum: ["user", "admin"],
       default: "user",
     },
+
+    googleId: {
+      type: String,
+      default: null,
+      sparse: true,
+    },
+
+    appleId: {
+      type: String,
+      default: null,
+      sparse: true,
+    },
+
+    authProviders: {
+      type: [String],
+      enum: ["local", "google", "apple"],
+      default: ["local"],
+    },
   },
   { timestamps: true }
 );

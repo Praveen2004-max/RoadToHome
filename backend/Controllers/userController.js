@@ -4,6 +4,12 @@ const Notification = require("../Modules/Notification");
 const cloudinary = require("../Config/cloudinary");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const { OAuth2Client } = require("google-auth-library");
+const appleSignin = require("apple-signin-auth");
+
+const googleClient = new OAuth2Client(
+  process.env.GOOGLE_CLIENT_ID
+);
 
 // ==========================================
 // CLOUDINARY HELPERS
@@ -323,6 +329,193 @@ const signIN = async (req, res) => {
 };
 
 // ==========================================
+// GOOGLE / APPLE SIGN IN
+// ==========================================
+
+const socialSignIn = async (req, res) => {
+  try {
+    const { provider, credential } = req.body;
+
+    if (!["google", "apple"].includes(provider)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid authentication provider.",
+      });
+    }
+
+    if (!credential) {
+      return res.status(400).json({
+        success: false,
+        message: "Identity token is required.",
+      });
+    }
+
+    let providerId;
+    let email;
+    let fullName;
+    let profileImage = "";
+    let emailVerified = false;
+
+    // GOOGLE TOKEN VERIFICATION
+    if (provider === "google") {
+      if (!process.env.GOOGLE_CLIENT_ID) {
+        return res.status(500).json({
+          success: false,
+          message: "Google authentication is not configured.",
+        });
+      }
+
+      const ticket = await googleClient.verifyIdToken({
+        idToken: credential,
+        audience: process.env.GOOGLE_CLIENT_ID,
+      });
+
+      const payload = ticket.getPayload();
+
+      providerId = payload.sub;
+      email = payload.email;
+      fullName = payload.name || "RoadToHome User";
+      profileImage = payload.picture || "";
+      emailVerified = payload.email_verified === true;
+    }
+
+    // APPLE TOKEN VERIFICATION
+    if (provider === "apple") {
+      if (!process.env.APPLE_CLIENT_ID) {
+        return res.status(500).json({
+          success: false,
+          message: "Apple authentication is not configured.",
+        });
+      }
+
+      const payload = await appleSignin.verifyIdToken(
+        credential,
+        {
+          audience: process.env.APPLE_CLIENT_ID,
+          ignoreExpiration: false,
+        }
+      );
+
+      providerId = payload.sub;
+      email = payload.email;
+      emailVerified =
+        payload.email_verified === true ||
+        payload.email_verified === "true";
+
+      fullName =
+        req.body.fullName?.trim() ||
+        (email ? email.split("@")[0] : "Apple User");
+    }
+
+    if (!providerId || !email || !emailVerified) {
+      return res.status(401).json({
+        success: false,
+        message: "Unable to verify your social account.",
+      });
+    }
+
+    email = String(email).trim().toLowerCase();
+
+    const providerField =
+      provider === "google" ? "googleId" : "appleId";
+
+    // Find existing account by provider ID or verified email.
+    let user = await User.findOne({
+      $or: [
+        { [providerField]: providerId },
+        { email },
+      ],
+    });
+
+    if (user) {
+      // Prevent linking a different provider identity to an
+      // account that already has another ID for this provider.
+      if (user[providerField] && user[providerField] !== providerId) {
+        return res.status(409).json({
+          success: false,
+          message: "This email is linked to another social account.",
+        });
+      }
+
+      user[providerField] = providerId;
+
+      if (!user.authProviders.includes(provider)) {
+        user.authProviders.push(provider);
+      }
+
+      if (!user.profileImage && profileImage) {
+        user.profileImage = profileImage;
+      }
+
+      if (
+        (!user.fullName || user.fullName === "Apple User") &&
+        fullName
+      ) {
+        user.fullName = fullName;
+      }
+
+      await user.save();
+    } else {
+      user = await User.create({
+        fullName,
+        email,
+        phone: "",
+        profileImage,
+        [providerField]: providerId,
+        authProviders: [provider],
+        role: "user",
+      });
+
+      await sendUserNotification({
+        recipients: [user._id],
+        title: "Welcome to RoadToHome!",
+        message: `Hello ${user.fullName}, your account has been created successfully.`,
+        link: "/my-profile",
+      });
+
+      await notifyAdmins({
+        title: "New User Registered",
+        message: `${user.fullName} registered using ${provider}.`,
+      });
+    }
+
+    if (!process.env.JWT_SECRET) {
+      throw new Error("JWT_SECRET is missing.");
+    }
+
+    const token = jwt.sign(
+      {
+        id: user._id,
+        role: user.role,
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: `${provider} sign in successful.`,
+      token,
+      user: {
+        id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+        phone: user.phone,
+        profileImage: user.profileImage,
+        role: user.role,
+      },
+    });
+  } catch (error) {
+    console.error("Social Sign In Error:", error);
+
+    return res.status(401).json({
+      success: false,
+      message: "Social authentication failed.",
+    });
+  }
+};
+
+// ==========================================
 // GET MY PROFILE
 // ==========================================
 
@@ -604,6 +797,7 @@ const getAllUsers = async (req, res) => {
 module.exports = {
   signUP,
   signIN,
+  socialSignIn,
   getMyProfile,
   updateMyProfile,
   getAllUsers,

@@ -44,3 +44,60 @@
 .animate-progress-bar {
   animation: progress-bar 1.2s ease-in-out infinite;
 }
+
+
+.social-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  margin-top: 20px;
+}
+
+.google-button,
+.apple-button {
+  width: 100%;
+  height: 48px;
+  min-height: 48px;
+  box-sizing: border-box;
+}
+
+.google-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+/* Google official button */
+.google-button > div {
+  width: 100% !important;
+}
+
+/* Apple button */
+.apple-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 16px;
+  background: #ffffff;
+  color: #171717;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.apple-button:hover {
+  background: #f8fafc;
+  border-color: #9ca3af;
+}
+
+.apple-button:focus-visible {
+  outline: 2px solid #f97316;
+  outline-offset: 2px;
+}

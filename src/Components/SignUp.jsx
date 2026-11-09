@@ -1,5 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import API from "../services/api";
+import { GoogleLogin } from "@react-oauth/google";
 
 import {
     Home,
@@ -148,63 +149,163 @@ const SignUp = () => {
 
     // Submit registration
     const handleSignUp = async (e) => {
-        e.preventDefault();
+    e.preventDefault();
 
+    setError("");
+    setSuccess("");
+
+    const validationError = validateForm();
+
+    if (validationError) {
+        setError(validationError);
+        return;
+    }
+
+    try {
+        setLoading(true);
+
+        const data = new FormData();
+
+        data.append("fullName", formData.fullName.trim());
+        data.append("email", formData.email.trim().toLowerCase());
+        data.append("phone", formData.phone.trim());
+        data.append("location", formData.location.trim());
+        data.append("gender", formData.gender);
+        data.append("password", formData.password);
+
+        if (profileImage) {
+        data.append("profileImage", profileImage);
+        }
+
+        const response = await API.post("/users/signUp", data);
+
+        if (response.data?.success === false) {
+        throw new Error(response.data.message || "Registration failed.");
+        }
+
+        setSuccess(
+        response.data?.message ||
+            "Your account has been created successfully!"
+        );
+
+        setFormData({
+        fullName: "",
+        email: "",
+        phone: "",
+        location: "",
+        gender: "",
+        password: "",
+        confirmPassword: "",
+        });
+
+        setProfileImage(null);
+        setPreviewImage("");
+
+        setTimeout(() => {
+        navigate("/signIn", { replace: true });
+        }, 1200);
+    } catch (err) {
+        console.error("SignUp Error:", err.response?.data || err);
+
+        setError(
+        err.response?.data?.message ||
+            err.message ||
+            "Registration failed. Please try again."
+        );
+    } finally {
+        setLoading(false);
+    }
+    };
+
+        const completeSocialLogin = (data) => {
+    if (!data?.success || !data?.token || !data?.user) {
+        throw new Error(data?.message || "Authentication failed.");
+    }
+
+    localStorage.setItem("token", data.token);
+    localStorage.setItem("user", JSON.stringify(data.user));
+
+    window.dispatchEvent(new Event("authChanged"));
+
+    navigate(
+        data.user.role === "admin" ? "/dashboard" : "/",
+        { replace: true }
+    );
+    };
+
+    const handleGoogleSuccess = async (response) => {
+    try {
         setError("");
-        setSuccess("");
+        setLoading(true);
 
-        const validationError = validateForm();
-
-        if (validationError) {
-            setError(validationError);
-            return;
+        if (!response?.credential) {
+        throw new Error("Google authentication token not received.");
         }
 
-        try {
-            setLoading(true);
+        const { data } = await API.post("/users/social-signIn", {
+        provider: "google",
+        credential: response.credential,
+        });
 
-            const data = new FormData();
+        completeSocialLogin(data);
+    } catch (err) {
+        setError(
+        err.response?.data?.message ||
+            err.message ||
+            "Google signup failed."
+        );
+    } finally {
+        setLoading(false);
+    }
+};
 
-            data.append("fullName", formData.fullName.trim());
-            data.append("email", formData.email.trim().toLowerCase());
-            data.append("phone", formData.phone.trim());
-            data.append("location", formData.location.trim());
-            data.append("gender", formData.gender);
-            data.append("password", formData.password);
+    const handleAppleSignIn = async () => {
+    try {
+        setError("");
+        setLoading(true);
 
-            if (profileImage) {
-                data.append("profileImage", profileImage);
-            }
-
-            const response = await API.post(
-                "/users/signUp",
-                data
-            );
-
-            setSuccess(
-                response.data?.message ||
-                "Your account has been created successfully!"
-            );
-
-            // Redirect to SignIn after successful registration
-            setTimeout(() => {
-                navigate("/signIn", { replace: true });
-            }, 1200);
-
-        } catch (err) {
-            console.error(
-                "SignUp Error:",
-                err.response?.data || err
-            );
-
-            setError(
-                err.response?.data?.message ||
-                "Registration failed. Please try again."
-            );
-
-        } finally {
-            setLoading(false);
+        if (!window.AppleID) {
+        throw new Error("Apple Sign In is loading. Please try again.");
         }
+
+        window.AppleID.auth.init({
+        clientId: import.meta.env.VITE_APPLE_CLIENT_ID,
+        scope: "name email",
+        redirectURI: import.meta.env.VITE_APPLE_REDIRECT_URI,
+        usePopup: true,
+        });
+
+        const response = await window.AppleID.auth.signIn();
+
+        const credential = response?.authorization?.id_token;
+
+        if (!credential) {
+        throw new Error("Apple authentication token not received.");
+        }
+
+        const fullName = [
+        response.user?.name?.firstName,
+        response.user?.name?.lastName,
+        ]
+        .filter(Boolean)
+        .join(" ");
+
+        const { data } = await API.post("/users/social-signIn", {
+        provider: "apple",
+        credential,
+        fullName,
+        });
+
+        completeSocialLogin(data);
+    } catch (err) {
+        setError(
+        err.response?.data?.message ||
+            err.message ||
+            "Apple signup failed."
+        );
+    } finally {
+        setLoading(false);
+    }
     };
 
     // Reusable input class
@@ -213,6 +314,19 @@ const SignUp = () => {
 
     const labelClass =
         "mb-2 flex items-center gap-2 text-sm font-medium text-gray-700";
+
+
+    useEffect(() => {
+        if (document.getElementById("apple-auth-script")) return;
+
+        const script = document.createElement("script");
+        script.id = "apple-auth-script";
+        script.src =
+            "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js";
+        script.async = true;
+
+        document.body.appendChild(script);
+    }, []);
 
     return (
         <div className="relative min-h-screen overflow-hidden bg-[#f4f6f8] p-3 sm:p-6 flex items-center justify-center">
@@ -773,6 +887,39 @@ const SignUp = () => {
                                 </Link>
                             </p>
 
+                        </div>
+
+                        {/* Social Signup Buttons */}
+                        <div className="social-buttons">
+                        <div className="google-button">
+                            <GoogleLogin
+                            onSuccess={handleGoogleSuccess}
+                            onError={() => setError("Google login failed")}
+                            text="continue_with"
+                            shape="rectangular"
+                            theme="outline"
+                            size="large"
+                            width="100%"
+                            />
+                        </div>
+
+                        <button
+                            type="button"
+                            onClick={handleAppleSignIn}
+                            className="apple-button"
+                        >
+                            <svg
+                            viewBox="0 0 24 24"
+                            width="20"
+                            height="20"
+                            fill="currentColor"
+                            aria-hidden="true"
+                            >
+                            <path d="M16.7 12.8c0-2.1 1.7-3.1 1.8-3.2-1-1.5-2.6-1.7-3.2-1.7-1.4-.1-2.7.8-3.4.8-.7 0-1.8-.8-2.9-.8-1.5 0-2.9.9-3.7 2.2-1.6 2.8-.4 7 1.1 9.3.7 1.1 1.5 2.3 2.6 2.2 1-.1 1.4-.7 2.7-.7s1.7.7 2.8.7c1.2 0 1.9-1.1 2.6-2.2.8-1.2 1.1-2.4 1.1-2.5-.1 0-2.1-.8-2.1-3.1zM14.5 6.5c.6-.7 1-1.6.9-2.5-.8 0-1.8.5-2.4 1.2-.5.6-1 1.5-.9 2.4.9.1 1.8-.4 2.4-1.1z" />
+                            </svg>
+
+                            <span>Continue with Apple</span>
+                        </button>
                         </div>
 
                         {/* Footer */}

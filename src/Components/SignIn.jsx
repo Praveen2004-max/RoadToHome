@@ -1,6 +1,6 @@
-
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import API from "../services/api";
+import { GoogleLogin } from "@react-oauth/google";
 import {
     HandMetal,
     Mail,
@@ -12,7 +12,8 @@ import {
     EyeOff,
     Loader2,
     ShieldCheck,
-    AlertCircle
+    AlertCircle,
+    // Chrome, Apple,
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 
@@ -41,73 +42,153 @@ const SignIn = () => {
     };
 
     // Handle Login
-    const handleSignIn = async (e) => {
-        e.preventDefault();
-        setError("");
+        const handleSignIn = async (e) => {
+    e.preventDefault();
+    setError("");
 
-        const email = formData.email.trim().toLowerCase();
-        const password = formData.password;
+    const email = formData.email.trim().toLowerCase();
+    const password = formData.password;
 
-        // Frontend validation
-        if (!email || !password) {
-            setError("Please enter your email and password.");
-            return;
-        }
+    if (!email || !password) {
+        setError("Please enter your email and password.");
+        return;
+    }
 
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-        if (!emailRegex.test(email)) {
-            setError("Please enter a valid email address.");
-            return;
-        }
+    if (!emailRegex.test(email)) {
+        setError("Please enter a valid email address.");
+        return;
+    }
 
-        try {
-            setLoading(true);
+    try {
+        setLoading(true);
 
-            const response = await API.post("/users/signIn", {
-                email,
-                password
-            });
+        const { data } = await API.post("/users/signIn", {
+        email,
+        password,
+        });
 
-            const { token, user } = response.data;
+        completeLogin(data);
+    } catch (err) {
+        console.error("SignIn Error:", err.response?.data || err);
 
-            // Validate backend response
-            if (!token || !user) {
-                throw new Error("Invalid login response from server.");
-            }
-
-            if (!user.role) {
-                throw new Error(
-                    "User role is missing. Please check your backend login response."
-                );
-            }
-
-            // Save authentication data
-            localStorage.setItem("token", token);
-            localStorage.setItem("user", JSON.stringify(user));
-
-            // Role-based redirect
-            if (user.role === "admin") {
-                navigate("/dashboard", { replace: true });
-            } else {
-                navigate("/", { replace: true });
-            }
-
-        } catch (err) {
-            console.error(
-                "SignIn Error:",
-                err.response?.data || err
-            );
-
-            setError(
-                err.response?.data?.message ||
-                err.message ||
-                "Unable to sign in. Please try again."
-            );
-        } finally {
-            setLoading(false);
-        }
+        setError(
+        err.response?.data?.message ||
+            err.message ||
+            "Unable to sign in. Please try again."
+        );
+    } finally {
+        setLoading(false);
+    }
     };
+
+        const completeLogin = (data) => {
+    if (!data?.success || !data?.token || !data?.user) {
+        throw new Error(data?.message || "Invalid login response from server.");
+    }
+
+    if (!data.user.role) {
+        throw new Error("User role is missing in the server response.");
+    }
+
+    localStorage.setItem("token", data.token);
+    localStorage.setItem("user", JSON.stringify(data.user));
+
+    window.dispatchEvent(new Event("authChanged"));
+
+    navigate(
+        data.user.role === "admin" ? "/dashboard" : "/",
+        { replace: true }
+    );
+    };
+
+    const handleGoogleSuccess = async (response) => {
+    try {
+        setError("");
+        setLoading(true);
+
+        if (!response?.credential) {
+        throw new Error("Google authentication token not received.");
+        }
+
+        const { data } = await API.post("/users/social-signIn", {
+        provider: "google",
+        credential: response.credential,
+        });
+
+        completeLogin(data);
+    } catch (err) {
+        setError(
+        err.response?.data?.message ||
+            err.message ||
+            "Google login failed."
+        );
+    } finally {
+        setLoading(false);
+    }
+    };
+
+    const handleAppleSignIn = async () => {
+    try {
+        setError("");
+        setLoading(true);
+
+        if (!window.AppleID) {
+        throw new Error("Apple Sign In is loading. Please try again.");
+        }
+
+        window.AppleID.auth.init({
+        clientId: import.meta.env.VITE_APPLE_CLIENT_ID,
+        scope: "name email",
+        redirectURI: import.meta.env.VITE_APPLE_REDIRECT_URI,
+        usePopup: true,
+        });
+
+        const response = await window.AppleID.auth.signIn();
+
+        const credential = response?.authorization?.id_token;
+
+        if (!credential) {
+        throw new Error("Apple authentication token not received.");
+        }
+
+        const fullName = [
+        response.user?.name?.firstName,
+        response.user?.name?.lastName,
+        ]
+        .filter(Boolean)
+        .join(" ");
+
+        const { data } = await API.post("/users/social-signIn", {
+        provider: "apple",
+        credential,
+        fullName,
+        });
+
+        completeLogin(data);
+    } catch (err) {
+        setError(
+        err.response?.data?.message ||
+            err.message ||
+            "Apple login failed."
+        );
+    } finally {
+        setLoading(false);
+    }
+    };
+
+    useEffect(() => {
+        if (document.getElementById("apple-auth-script")) return;
+
+        const script = document.createElement("script");
+        script.id = "apple-auth-script";
+        script.src =
+            "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js";
+        script.async = true;
+
+        document.body.appendChild(script);
+    }, []);
 
     return (
         <div className="relative min-h-screen bg-[#f4f6f8] p-3 sm:p-6 flex items-center justify-center overflow-hidden">
@@ -376,6 +457,47 @@ const SignIn = () => {
                                 </Link>
                             </p>
 
+                        </div>
+
+                   {/* Social Login Buttons */}
+                    <div className="social-buttons">
+  <div className="google-button">
+    <GoogleLogin
+      onSuccess={handleGoogleSuccess}
+      onError={() => setError("Google login failed")}
+      text="continue_with"
+      shape="rectangular"
+      theme="outline"
+      size="large"
+      width="100%"
+    />
+  </div>
+
+  <button
+    type="button"
+    onClick={handleAppleSignIn}
+    className="apple-button"
+  >
+    <svg
+      viewBox="0 0 24 24"
+      width="20"
+      height="20"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <path d="M16.7 12.8c0-2.1 1.7-3.1 1.8-3.2-1-1.5-2.6-1.7-3.2-1.7-1.4-.1-2.7.8-3.4.8-.7 0-1.8-.8-2.9-.8-1.5 0-2.9.9-3.7 2.2-1.6 2.8-.4 7 1.1 9.3.7 1.1 1.5 2.3 2.6 2.2 1-.1 1.4-.7 2.7-.7s1.7.7 2.8.7c1.2 0 1.9-1.1 2.6-2.2.8-1.2 1.1-2.4 1.1-2.5-.1 0-2.1-.8-2.1-3.1zM14.5 6.5c.6-.7 1-1.6.9-2.5-.8 0-1.8.5-2.4 1.2-.5.6-1 1.5-.9 2.4.9.1 1.8-.4 2.4-1.1z" />
+    </svg>
+
+    <span>Continue with Apple</span>
+  </button>
+</div>
+
+                        <div className="my-6 flex items-center gap-4">
+                            <span className="h-px flex-1 bg-gray-200" />
+                            <span className="text-xs font-medium uppercase tracking-wider text-gray-400">
+                                OR SIGN UP WITH EMAIL
+                            </span>
+                            <span className="h-px flex-1 bg-gray-200" />
                         </div>
 
                         {/* Footer */}
